@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# -------------------------------------------------------------
+# AUTOBOT STRICT NO-LEAKAGE POLICY (Runtime & Data)
+# -------------------------------------------------------------
+# Ignore all new architecture runtime artifacts
+autobot_workspace/
+visor_workspace/
+scratch/
+scripts/
+
+# Ignore all user-specific data and scraping targets
+data/artifacts/
+*.csv
+
+# Ignore all media generated during runs/failures
+*.png
+*.mp4
+*.webm
+
+# Ignore legacy architecture directories
+session.json
+agent_handshake/
+logs/
+
+# Debug HTML dumps
+*.html
+
+# Sensitive config
+secret_ground_truth.json
+blind_benchmark_tasks.json
+.env
+*.env
+
+# IDE
+.vscode/
+.idea/
