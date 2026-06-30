@@ -1,0 +1,13 @@
+{
+  "linkedinfeed": {
+    "find_Send_without_a_note": {
+      "not_found": {
+        "Pending_visible": {
+          "action": "skip",
+          "reason": "already_pending",
+          "note": "Connect was clicked and it instantly went to Pending without a modal."
+        }
+      }
+    }
+  }
+}

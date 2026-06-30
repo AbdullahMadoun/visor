@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "visor"
+version = "0.1.0"
+description = "A self-healing, human-in-the-loop browser automation framework that hijacks your local session."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Abdullah", email = "abdullah@example.com"}
+]
+dependencies = [
+    "playwright>=1.39.0",
+    "easyocr>=1.7.1",
+    "Pillow>=10.0.0",
+    "opencv-python>=4.8.0",
+    "rich>=13.0.0"
+]
+
+[project.optional-dependencies]
+mac = ["ocrmac>=0.1.0"]
+dev = [
+    "pytest>=7.4.0"
+]
+
+[project.scripts]
+visor = "visor.cli:main"
