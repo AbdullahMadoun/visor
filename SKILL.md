@@ -50,7 +50,7 @@ The script pauses and writes `agent_handshake/failure.json` when:
 
 **When AGENT_NEEDED fires:**
 1. **Do NOT just retry the same thing.**
-2. **View the screenshot immediately** (`logs/failures/<filename>.png`). What does the page actually show?
+2. **Read `failure.json` fully first.** The screenshot is embedded directly as `screenshot_b64` (base64 PNG) — decode and view it immediately. You do NOT need a separate `view_file` tool call for the image. The `ocr_results` array contains every visible string on screen at the moment of failure.
 3. **Read all OCR text**. What elements are actually present?
 4. **Generate DIVERGENT Hypotheses (Never Tunnel-Vision)**: Do not get stuck endlessly retrying one failed path. You must explicitly brainstorm multiple, equally smart, laterally divergent paths. Look for "tricks" or alternative ways around the UI. (e.g., Is there a modal? Hit Escape. Is the button hidden? Try zooming out. Is the main flow blocked? Search for an alternative entry point in a dropdown. Can we force it via DOM evaluate?).
 5. **Write fix.json** to mutate the strategy tree, or fix the code and relaunch.
