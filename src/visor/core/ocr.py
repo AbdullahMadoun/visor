@@ -195,3 +195,51 @@ def find_near(label: str, img_path: str, near_x: int, near_y: int,
 def summarize(img_path: str) -> list:
     """Return all found text strings for agent analysis."""
     return [item["text"] for item in find_all(img_path)]
+
+
+def find_with_scroll(label: str, page, max_scrolls: int = 5, exact: bool = False, min_conf: float = 0.6) -> Optional[dict]:
+    """
+    Auto-scroll discovery engine.
+    Pages down and searches iteratively until the target is found.
+    """
+    import os
+    from visor.core import PROJECT_ROOT
+    
+    for i in range(max_scrolls + 1):
+        img_path = os.path.join(PROJECT_ROOT, "visor_workspace", "logs", f"scroll_scan_{i}.png")
+        page.screenshot(path=img_path)
+        match = find(label, img_path, exact=exact, min_conf=min_conf)
+        if match:
+            print(f"[OCR-SCROLL] Found '{label}' after {i} scrolls at ({match['x']}, {match['y']}).")
+            return match
+            
+        if i < max_scrolls:
+            print(f"[OCR-SCROLL] '{label}' not found on screen {i}. Scrolling down...")
+            page.mouse.wheel(0, 600)
+            page.wait_for_timeout(1500)   # non-blocking — stays on Playwright's event loop
+        
+    print(f"[OCR-SCROLL] '{label}' not found after {max_scrolls} scrolls.")
+    return None
+
+
+def semantic_find(query: str, img_path: str, min_conf: float = 0.6) -> Optional[dict]:
+    """
+    Semantic mapping for multi-lingual/obfuscated UIs.
+    Maps an abstract query like 'cart' to localized bounding boxes.
+    In a full LLM integration, this would send `summarize(img_path)` to an LLM.
+    """
+    dictionary = {
+        "cart": ["cart", "basket", "أضف إلى عربة", "عربة"],
+        "search": ["search", "looking", "find", "ابحث", "بحث"],
+        "english": ["english", "en", "eng"]
+    }
+    
+    target_list = dictionary.get(query.lower(), [query])
+    for target in target_list:
+        match = find(target, img_path, exact=False, min_conf=min_conf)
+        if match:
+            print(f"[OCR-SEMANTIC] Mapped semantic intent '{query}' to visual text '{target}'.")
+            return match
+    
+    print(f"[OCR-SEMANTIC] Could not map intent '{query}' to any visible text.")
+    return None
