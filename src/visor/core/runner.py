@@ -46,26 +46,18 @@ def _save_screenshot(label: str) -> str:
 def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str):
     """
     Write failure context to failure.json and block until agent writes fix.json.
-    The screenshot is embedded as base64 so the agent has immediate visual context.
+    The agent diagnoses purely from ocr_results — screenshot_path is an audit trail only.
     """
     # Clean up any stale fix
     if os.path.exists(FIX_JSON):
         os.remove(FIX_JSON)
 
-    # Embed screenshot as base64 so agent doesn't need a second tool call
-    screenshot_b64 = None
-    if screenshot_path and os.path.exists(screenshot_path):
-        import base64
-        with open(screenshot_path, "rb") as img_f:
-            screenshot_b64 = base64.b64encode(img_f.read()).decode("utf-8")
-
     payload = {
         "timestamp": datetime.now().isoformat(),
         "url": url,
         "step": step,
-        "screenshot_path": screenshot_path,
-        "screenshot_b64": screenshot_b64,
-        "ocr_results": ocr_found,
+        "screenshot_path": screenshot_path,   # audit trail — agent does NOT read this
+        "ocr_results": ocr_found,             # full list of every visible string — THIS is what the agent reads
         "message": f"AGENT_NEEDED: step='{step}' failed. OCR found: {ocr_found}"
     }
     with open(FAILURE_JSON, "w") as f:
