@@ -64,16 +64,12 @@ def main():
     # Load flow dynamically instead of 100 hardcoded branches
     import importlib
     
-    if args.flow.startswith("mind2web_task_"):
-        module_name = f"visor.platforms.mind2web.{args.flow.replace('mind2web_', '')}"
-    elif args.flow.startswith("benchmark_task_"):
-        module_name = f"visor.platforms.benchmark.{args.flow.replace('benchmark_', '')}"
+    # Dynamically load the module based on the flow name
+    if "_" in args.flow:
+        platform, flow_name = args.flow.split("_", 1)
+        module_name = f"visor.platforms.{platform}.{flow_name}"
     else:
-        if "_" in args.flow:
-            platform, flow_name = args.flow.split("_", 1)
-            module_name = f"visor.platforms.{platform}.{flow_name}"
-        else:
-            module_name = f"visor.platforms.{args.flow}.main"
+        module_name = f"visor.platforms.{args.flow}.main"
             
     try:
         module = importlib.import_module(module_name)
