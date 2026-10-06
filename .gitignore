@@ -24,6 +24,8 @@ scripts/
 # Ignore all user-specific data and scraping targets
 data/artifacts/
 *.csv
+src/visor/platforms/linkedin/
+src/visor/logs/
 
 # Ignore all media generated during runs/failures
 *.png

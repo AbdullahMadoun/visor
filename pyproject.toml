@@ -28,3 +28,7 @@ dev = [
 
 [project.scripts]
 visor = "visor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
