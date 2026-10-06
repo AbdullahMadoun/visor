@@ -17,7 +17,7 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(line_buffering=True)
 
 from visor.core.runner import run_flow
-from visor.core import PROJECT_ROOT
+from visor.core import WORKSPACE_DIR
 
 def load_targets(path: str) -> list[str]:
     targets = []
@@ -35,44 +35,53 @@ def load_targets(path: str) -> list[str]:
 
 def main():
     parser = argparse.ArgumentParser(description="visor — self-healing browser automation")
-    parser.add_argument("--flow",    required=False, help="Flow to run (e.g. my_custom_flow)")
+    parser.add_argument("--flow",    required=False, help="Flow to run (e.g. my_custom_flow or ./path/to/flow.py)")
     parser.add_argument("--targets", required=False, help="CSV file with 'url' column")
     parser.add_argument("--retries", type=int, default=1, help="Max retry loops until 100%% success")
-    parser.add_argument("--record",  required=False, help="Launch the semantic UI overlay recorder to record a new flow")
-    parser.add_argument("--url",     required=False, help="Starting URL for recording mode")
+    parser.add_argument("--record",  action="store_true", help="Start recording a new flow")
+    parser.add_argument("--url",     type=str, help="Start URL for recording")
+    parser.add_argument("--description", type=str, help="Goal description for synthesis")
     args = parser.parse_args()
 
-    if args.record:
-        if not args.url:
-            print("[!] Error: --url is required when using --record")
-            sys.exit(1)
-        from visor.core.recorder import start_recording
-        start_recording(args.record, args.url, "User-recorded workflow")
-        from visor.core import browser
-        browser.close()
-        print(f"\n[DAEMON] Recording complete. You can now ask the agent to synthesize '{args.record}'.")
+    if not args.flow and not args.targets and not args.record:
+        parser.print_help()
         sys.exit(0)
 
+    if args.record:
+        if not args.flow or not args.url or not args.description:
+            print("[!] Error: --record requires --flow, --url, and --description")
+            sys.exit(1)
+            
+        print(f"--- Recording New Flow: {args.flow} ---")
+        
+        from visor.core.recorder import start_recording
+        trace_file = start_recording(args.flow, args.url, args.description)
+        
+        print(f"\n[DAEMON] Recording saved to {trace_file}")
+        print(f"[DAEMON] You can now ask your AI Agent to synthesize this flow into a Python script!")
+        sys.exit(0)
+        
     if not args.flow or not args.targets:
-        print("[!] Error: --flow and --targets are required for running a workflow")
+        print("[!] Error: Normal execution requires --flow and --targets")
         sys.exit(1)
 
-    # Load flow dynamically instead of 100 hardcoded branches
     import importlib
     
-    if args.flow.startswith("mind2web_task_"):
-        module_name = f"visor.platforms.mind2web.{args.flow.replace('mind2web_', '')}"
-    elif args.flow.startswith("benchmark_task_"):
-        module_name = f"visor.platforms.benchmark.{args.flow.replace('benchmark_', '')}"
-    else:
-        if "_" in args.flow:
+    try:
+        # Allow loading flows directly by Python file path
+        if args.flow.endswith(".py") or os.path.isfile(args.flow):
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("user_flow", args.flow)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        elif "_" in args.flow:
             platform, flow_name = args.flow.split("_", 1)
             module_name = f"visor.platforms.{platform}.{flow_name}"
+            module = importlib.import_module(module_name)
         else:
             module_name = f"visor.platforms.{args.flow}.main"
-            
-    try:
-        module = importlib.import_module(module_name)
+            module = importlib.import_module(module_name)
+
         # Store for Python hot-reloading (restart_flow action)
         import visor.core.runner as runner
         runner._active_module = module
@@ -102,7 +111,7 @@ def main():
     from visor.strategy import tree
     tree.show_map()
 
-    results_csv = os.path.join(PROJECT_ROOT, "visor_workspace", "logs", "results.csv")
+    results_csv = os.path.join(WORKSPACE_DIR, "logs", "results.csv")
     run_flow(flow_fn, targets, results_csv, max_retries=args.retries)
     
     # Clean up browser session
