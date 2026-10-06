@@ -22,7 +22,7 @@ with open(OCR) as f:
     src = f.read()
 
 # Public API surface
-for fn in ["find_all", "find", "find_near", "summarize", "find_with_scroll", "semantic_find"]:
+for fn in ["find_all", "find", "find_near", "summarize", "find_with_scroll", "semantic_find", "wait_for_text"]:
     if f"def {fn}(" in src:
         ok(f"ocr.{fn} defined")
     else:
@@ -35,7 +35,7 @@ else:
     ok("ocr.read() correctly absent")
 
 # find_with_scroll uses time.sleep (blocking) not page.wait_for_timeout
-lines = grep(OCR, "time.sleep")
+lines = grep(OCR, "time.sleep(")
 if lines:
     fail(f"ocr.find_with_scroll uses time.sleep on lines {lines} — blocks sync loop, should use page.wait_for_timeout")
 else:
@@ -65,7 +65,7 @@ if "expose_binding" in src:
 else:
     ok("recorder.py uses page.route (no expose_binding deadlock)")
 
-if "_action_queue.get_nowait()" in src:
+if "action_queue.get_nowait()" in src:
     ok("recorder.py drains queue with get_nowait() — non-blocking")
 else:
     fail("recorder.py may block on queue.get() — should use get_nowait()")

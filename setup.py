@@ -14,6 +14,7 @@ setup(
         "rich>=13.0.0"
     ],
     extras_require={
+        "mac": ["ocrmac>=0.1.0"],
         "dev": ["pytest>=7.4.0"]
     },
     entry_points={

@@ -1,4 +1,3 @@
-import time
 import random
 from visor.core import browser
 
@@ -14,7 +13,7 @@ def click(px: int, py: int):
     
     # Move mouse naturally first
     page.mouse.move(px, py, steps=5)
-    time.sleep(random.uniform(0.1, 0.25))
+    browser.get_page().wait_for_timeout(int(random.uniform(100, 250)))
     
     # Click
     page.mouse.click(px, py)
@@ -35,9 +34,9 @@ def human_wait(base: float = 4.0, noise: float = 5.0):
     """Noisy human-like delay between profiles (4–9s)."""
     delay = base + random.random() * noise
     print(f"[WAIT] {delay:.1f}s")
-    time.sleep(delay)
+    browser.get_page().wait_for_timeout(int(delay * 1000))
 
 def short_wait(base: float = 1.5, noise: float = 2.0):
     """Shorter noisy wait for within-page actions."""
     delay = base + random.random() * noise
-    time.sleep(delay)
+    browser.get_page().wait_for_timeout(int(delay * 1000))
