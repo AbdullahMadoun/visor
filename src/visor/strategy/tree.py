@@ -1,15 +1,22 @@
 import json
 import os
 
-TREE_PATH = os.path.join(os.path.dirname(__file__), "tree.json")
+from visor.core import WORKSPACE_DIR
+
+DEFAULT_TREE_PATH = os.path.join(os.path.dirname(__file__), "tree.json")
+TREE_PATH = os.environ.get("VISOR_STRATEGY_TREE", os.path.join(WORKSPACE_DIR, "tree.json"))
 
 def load() -> dict:
     if os.path.exists(TREE_PATH):
         with open(TREE_PATH) as f:
             return json.load(f)
+    if os.path.exists(DEFAULT_TREE_PATH):
+        with open(DEFAULT_TREE_PATH) as f:
+            return json.load(f)
     return {}
 
 def save(tree: dict):
+    os.makedirs(os.path.dirname(TREE_PATH), exist_ok=True)
     with open(TREE_PATH, "w") as f:
         json.dump(tree, f, indent=2)
 

@@ -24,13 +24,13 @@ from datetime import datetime
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 
-from visor.core import browser, ocr, clicker, PROJECT_ROOT
+from visor.core import browser, ocr, clicker, WORKSPACE_DIR
 from visor.strategy import tree as strategy_tree
 
-HANDSHAKE_DIR = os.path.join(PROJECT_ROOT, "visor_workspace", "agent_handshake")
+HANDSHAKE_DIR = os.path.join(WORKSPACE_DIR, "agent_handshake")
 FAILURE_JSON  = os.path.join(HANDSHAKE_DIR, "failure.json")
 FIX_JSON      = os.path.join(HANDSHAKE_DIR, "fix.json")
-FAILURES_DIR  = os.path.join(PROJECT_ROOT, "visor_workspace", "logs", "failures")
+FAILURES_DIR  = os.path.join(WORKSPACE_DIR, "logs", "failures")
 
 os.makedirs(HANDSHAKE_DIR, exist_ok=True)
 os.makedirs(FAILURES_DIR, exist_ok=True)
@@ -88,7 +88,7 @@ def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str):
             except json.JSONDecodeError:
                 # File is actively being written by agent, wait for next tick
                 pass
-        time.sleep(1)
+        browser.get_page().wait_for_timeout(1000)
 
     print("[AGENT_NEEDED] Timed out waiting for fix. Skipping.")
     return {"action": "skip", "reason": "agent_timeout"}
@@ -184,7 +184,7 @@ def ocr_find_and_click(label: str, url: str, flow_key: str, retry: bool = True, 
                     clicker.click(target_match["x"], target_match["y"])
                     wait_after = branch.get("wait_after", 2.5)
                     print(f"[TREE] Waiting {wait_after}s for dropdown/animation...")
-                    time.sleep(wait_after)
+                    browser.get_page().wait_for_timeout(int(wait_after * 1000))
 
                     if branch.get("then", "").startswith("retry_find_") and retry:
                         img_after = browser.screenshot()
@@ -293,7 +293,10 @@ def run_flow(flow_fn, targets: list, results_csv: str, max_retries: int = 1):
             if status == "restart_flow":
                 print("[RUNNER] restart_flow requested! Hot-reloading active Python module...")
                 if hasattr(sys.modules[__name__], '_active_module') and sys.modules[__name__]._active_module:
-                    importlib.reload(sys.modules[__name__]._active_module)
+                    mod = importlib.reload(sys.modules[__name__]._active_module)
+                    sys.modules[__name__]._active_module = mod
+                    if hasattr(flow_fn, "__name__") and hasattr(mod, flow_fn.__name__):
+                        flow_fn = getattr(mod, flow_fn.__name__)
                     print("[RUNNER] Module reloaded successfully. Retrying target from scratch...")
                 # Push back into pending to restart from step 1
                 results[url] = "pending"

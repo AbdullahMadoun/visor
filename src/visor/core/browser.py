@@ -1,6 +1,6 @@
 import os
 from playwright.sync_api import sync_playwright
-from visor.core import PROJECT_ROOT
+from visor.core import WORKSPACE_DIR
 
 _playwright_context = None
 _browser_context = None
@@ -33,10 +33,10 @@ def init_browser(headless=False, record_video=False):
             args=["--remote-debugging-port=9222", "--no-sandbox", "--disable-dev-shm-usage"]
         )
         
-        session_file = os.path.join(PROJECT_ROOT, "visor_workspace", "session.json")
+        session_file = os.path.join(WORKSPACE_DIR, "session.json")
         context_kwargs = {"viewport": {"width": 1440, "height": 900}, "locale": "en-US"}
         if record_video:
-            video_dir = os.path.join(PROJECT_ROOT, "visor_workspace", "videos")
+            video_dir = os.path.join(WORKSPACE_DIR, "videos")
             os.makedirs(video_dir, exist_ok=True)
             context_kwargs["record_video_dir"] = video_dir
             print(f"[BROWSER] Video recording enabled. Saving to {video_dir}")
@@ -93,7 +93,7 @@ def navigate(url: str):
 def screenshot(save_path: str = None) -> str:
     page = get_page()
     if not save_path:
-        temp_dir = os.path.join(PROJECT_ROOT, "visor_workspace", "logs", "failures")
+        temp_dir = os.path.join(WORKSPACE_DIR, "logs", "failures")
         os.makedirs(temp_dir, exist_ok=True)
         save_path = os.path.join(temp_dir, "temp_screenshot.png")
     
@@ -102,23 +102,29 @@ def screenshot(save_path: str = None) -> str:
 
 def close():
     global _playwright_context, _browser_context, _page, _owns_browser
-    if _owns_browser:
-        if _browser_context:
+    if _page:
+        try:
+            _page.close()
+        except Exception:
+            pass
+        _page = None
+
+    if _browser_context:
+        try:
+            if not _owns_browser:
+                print("[BROWSER] Detaching from CDP session (not closing user's browser).")
             _browser_context.close()
-        if _playwright_context:
+        except Exception:
+            pass
+        _browser_context = None
+
+    if _playwright_context:
+        try:
             _playwright_context.stop()
-    else:
-        # Connected via CDP — don't close the user's browser, just detach
-        print("[BROWSER] Detaching from CDP session (not closing user's browser).")
-        if _page:
-            try:
-                print("[BROWSER] Closing isolated Visor tab...")
-                _page.close()
-            except Exception:
-                pass
-    _page = None
-    _browser_context = None
-    _playwright_context = None
+        except Exception:
+            pass
+        _playwright_context = None
+
     _owns_browser = False
 
 def scroll_down(pixels: int = 800, wait_ms: int = 1500):
