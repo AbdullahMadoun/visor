@@ -1,4 +1,5 @@
 import os
+import time
 from playwright.sync_api import sync_playwright
 from visor.core import WORKSPACE_DIR
 
@@ -83,6 +84,21 @@ def get_page():
         return init_browser(headless=False)
     return _page
 
+def wait(ms: int):
+    """
+    Pause without launching a browser or failing on a dead tab.
+    Uses page.wait_for_timeout when a live page exists so Playwright keeps
+    dispatching events; otherwise falls back to time.sleep.
+    """
+    if _page is not None:
+        try:
+            if not _page.is_closed():
+                _page.wait_for_timeout(ms)
+                return
+        except Exception:
+            pass
+    time.sleep(ms / 1000.0)
+
 def navigate(url: str):
     page = get_page()
     print(f"[BROWSER] Navigating to {url}")
@@ -110,12 +126,15 @@ def close():
         _page = None
 
     if _browser_context:
-        try:
-            if not _owns_browser:
-                print("[BROWSER] Detaching from CDP session (not closing user's browser).")
-            _browser_context.close()
-        except Exception:
-            pass
+        if _owns_browser:
+            try:
+                _browser_context.close()
+            except Exception:
+                pass
+        else:
+            # Connected via CDP — Browser.close() would tear down the user's browser.
+            # Stopping the Playwright driver below detaches without touching it.
+            print("[BROWSER] Detaching from CDP session (not closing user's browser).")
         _browser_context = None
 
     if _playwright_context:

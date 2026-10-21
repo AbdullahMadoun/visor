@@ -1,5 +1,5 @@
 import json
-import os
+from visor.strategy import tree
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 HTML_TEMPLATE = """
@@ -59,12 +59,12 @@ class TreeHandler(BaseHTTPRequestHandler):
         self.send_header('Content-type', 'text/html')
         self.end_headers()
         
-        tree_path = os.path.join(os.path.dirname(__file__), "tree.json")
-        data = {}
-        if os.path.exists(tree_path):
-            with open(tree_path) as f:
-                data = json.load(f)
-                
+        try:
+            data = tree.load()
+        except json.JSONDecodeError:
+            data = {}  # tree.json mid-write; next refresh picks it up
+
+
         tree_html = dict_to_html(data)
         if not tree_html:
             tree_html = "<li>No strategy loaded yet.</li>"
