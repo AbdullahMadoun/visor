@@ -20,6 +20,7 @@ import time
 import shutil
 import csv
 import importlib
+import importlib.util
 from datetime import datetime
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
@@ -32,14 +33,13 @@ FAILURE_JSON  = os.path.join(HANDSHAKE_DIR, "failure.json")
 FIX_JSON      = os.path.join(HANDSHAKE_DIR, "fix.json")
 FAILURES_DIR  = os.path.join(WORKSPACE_DIR, "logs", "failures")
 
-os.makedirs(HANDSHAKE_DIR, exist_ok=True)
-os.makedirs(FAILURES_DIR, exist_ok=True)
 
 
 def _ts():
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 def _save_screenshot(label: str) -> str:
+    os.makedirs(FAILURES_DIR, exist_ok=True)
     path = os.path.join(FAILURES_DIR, f"{label}_{_ts()}.png")
     return browser.screenshot(save_path=path)
 
@@ -48,6 +48,7 @@ def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str):
     Write failure context to failure.json and block until agent writes fix.json.
     The agent diagnoses purely from ocr_results — screenshot_path is an audit trail only.
     """
+    os.makedirs(HANDSHAKE_DIR, exist_ok=True)
     # Clean up any stale fix
     if os.path.exists(FIX_JSON):
         os.remove(FIX_JSON)
@@ -88,7 +89,7 @@ def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str):
             except json.JSONDecodeError:
                 # File is actively being written by agent, wait for next tick
                 pass
-        browser.get_page().wait_for_timeout(1000)
+        browser.wait(1000)
 
     print("[AGENT_NEEDED] Timed out waiting for fix. Skipping.")
     return {"action": "skip", "reason": "agent_timeout"}
@@ -184,7 +185,7 @@ def ocr_find_and_click(label: str, url: str, flow_key: str, retry: bool = True, 
                     clicker.click(target_match["x"], target_match["y"])
                     wait_after = branch.get("wait_after", 2.5)
                     print(f"[TREE] Waiting {wait_after}s for dropdown/animation...")
-                    browser.get_page().wait_for_timeout(int(wait_after * 1000))
+                    browser.wait(int(wait_after * 1000))
 
                     if branch.get("then", "").startswith("retry_find_") and retry:
                         img_after = browser.screenshot()
@@ -256,6 +257,25 @@ def verify_ocr(label: str) -> bool:
     return match is not None
 
 
+def _reload_module(mod):
+    """
+    Hot-reload a flow module. Flows loaded by file path are not on sys.path,
+    so importlib.reload can't find them; re-execute those from their source file.
+    """
+    # Read before reloading: a failed importlib.reload clears __spec__
+    spec = getattr(mod, "__spec__", None)
+    origin = getattr(spec, "origin", None)
+    try:
+        return importlib.reload(mod)
+    except ImportError:
+        if not origin or not os.path.isfile(origin):
+            raise
+        spec = importlib.util.spec_from_file_location(mod.__name__, origin)
+        mod.__spec__ = spec
+        spec.loader.exec_module(mod)
+        return mod
+
+
 def run_flow(flow_fn, targets: list, results_csv: str, max_retries: int = 1):
     """
     Main loop:
@@ -293,7 +313,13 @@ def run_flow(flow_fn, targets: list, results_csv: str, max_retries: int = 1):
             if status == "restart_flow":
                 print("[RUNNER] restart_flow requested! Hot-reloading active Python module...")
                 if hasattr(sys.modules[__name__], '_active_module') and sys.modules[__name__]._active_module:
-                    mod = importlib.reload(sys.modules[__name__]._active_module)
+                    try:
+                        mod = _reload_module(sys.modules[__name__]._active_module)
+                    except Exception as e:
+                        print(f"[ERROR] Hot-reload failed, keeping previous flow: {e}")
+                        results[url] = "failed"
+                        _write_csv(results, results_csv)
+                        continue
                     sys.modules[__name__]._active_module = mod
                     if hasattr(flow_fn, "__name__") and hasattr(mod, flow_fn.__name__):
                         flow_fn = getattr(mod, flow_fn.__name__)

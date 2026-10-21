@@ -32,25 +32,29 @@ def get_reader():
     return _reader
 
 
-def _resolve_scale_factor(img_w: int) -> float:
+def _resolve_scale_factor(img_w: int, page=None) -> float:
     """
     Safely resolves the scale factor without triggering an unintended browser launch.
-    Derives scaling deterministically from screenshot width vs viewport CSS width.
+    Derives scaling deterministically from screenshot width vs viewport CSS width,
+    using the page that took the screenshot when given, else visor's own page.
     """
-    from visor.core import browser
-    if browser._page is not None:
+    if page is None:
+        from visor.core import browser
+        page = browser._page
+    if page is not None:
         try:
-            if not browser._page.is_closed():
-                vp = browser._page.viewport_size
+            if not page.is_closed():
+                vp = page.viewport_size
                 if vp and vp.get("width"):
                     return max(1.0, round(img_w / float(vp["width"]), 2))
-                return float(browser._page.evaluate("window.devicePixelRatio"))
+                return float(page.evaluate("window.devicePixelRatio"))
         except Exception:
             pass
-    return 1.0
+    # No live page to measure: assume Retina on macOS (ocrmac), 1x elsewhere
+    return 2.0 if _use_ocrmac else 1.0
 
 
-def find_all(img_path: str) -> list:
+def find_all(img_path: str, page=None) -> list:
     """
     Run OCR on image, return all found text with positions.
     Returns list of: {text, x, y, x1, y1, x2, y2, confidence}
@@ -63,7 +67,7 @@ def find_all(img_path: str) -> list:
         return []
     h_img, w_img, _ = img.shape
 
-    scale_factor = _resolve_scale_factor(w_img)
+    scale_factor = _resolve_scale_factor(w_img, page)
 
     if _use_ocrmac:
         # ocrmac returns: (text, confidence, [x, y, w, h]) where coordinates are ratios (0-1)
@@ -151,12 +155,12 @@ def _score_match(candidate_text: str, target: str, exact: bool) -> tuple[int, fl
 
 def find(label: str, img_path: str, exact: bool = True,
          min_conf: float = 0.6,
-         bounds: dict = None) -> Optional[dict]:
+         bounds: dict = None, page=None) -> Optional[dict]:
     """
     Find a label in the screenshot — geometrically and hierarchically ranked.
     Exact matches outrank fuzzy matches regardless of OCR confidence score.
     """
-    all_items = find_all(img_path)
+    all_items = find_all(img_path, page)
 
     scored = []
     for item in all_items:
@@ -188,11 +192,12 @@ def find(label: str, img_path: str, exact: bool = True,
 
 
 def find_near(label: str, img_path: str, near_x: int, near_y: int,
-              radius: int = 150, exact: bool = True, min_conf: float = 0.7) -> Optional[dict]:
+              radius: int = 150, exact: bool = True, min_conf: float = 0.7,
+              page=None) -> Optional[dict]:
     """
     Find label within a radius of a known (x, y) point (e.g. inside a newly opened dropdown).
     """
-    all_items = find_all(img_path)
+    all_items = find_all(img_path, page)
     candidates = []
 
     for item in all_items:
@@ -222,10 +227,11 @@ def find_with_scroll(label: str, page, max_scrolls: int = 5, exact: bool = False
     Auto-scroll discovery engine.
     Pages down and searches iteratively until the target is found.
     """
+    os.makedirs(os.path.join(WORKSPACE_DIR, "logs"), exist_ok=True)
     for i in range(max_scrolls + 1):
         img_path = os.path.join(WORKSPACE_DIR, "logs", f"scroll_scan_{i}.png")
         page.screenshot(path=img_path)
-        match = find(label, img_path, exact=exact, min_conf=min_conf)
+        match = find(label, img_path, exact=exact, min_conf=min_conf, page=page)
         if match:
             print(f"[OCR-SCROLL] Found '{label}' after {i} scrolls at ({match['x']}, {match['y']}).")
             return match
@@ -245,7 +251,8 @@ SEMANTIC_REGISTRY = {
     "english": ["english", "eng"]
 }
 
-def semantic_find(query: str, img_path: str, min_conf: float = 0.6, custom_dict: dict = None) -> Optional[dict]:
+def semantic_find(query: str, img_path: str, min_conf: float = 0.6, custom_dict: dict = None,
+                  page=None) -> Optional[dict]:
     """
     Semantic mapping for multi-lingual/obfuscated UIs.
     Maps an abstract query like 'cart' to localized bounding boxes.
@@ -258,8 +265,9 @@ def semantic_find(query: str, img_path: str, min_conf: float = 0.6, custom_dict:
 
     target_list = active_dict.get(query.lower().strip(), [query])
     for target in target_list:
-        is_exact = len(target) <= 4
-        match = find(target, img_path, exact=is_exact, min_conf=min_conf)
+        # Substring matching stays on so 'cart' still hits 'Add to Cart';
+        # _score_match already disables fuzzy matching for short words.
+        match = find(target, img_path, exact=False, min_conf=min_conf, page=page)
         if match:
             print(f"[OCR-SEMANTIC] Mapped semantic intent '{query}' to visual text '{target}'.")
             return match
@@ -282,7 +290,7 @@ def wait_for_text(label: str, page, timeout_ms: int = 5000, exact: bool = False,
         while (time.monotonic() - start_time) < timeout_sec:
             try:
                 page.screenshot(path=temp_path)
-                match = find(label, temp_path, exact=exact, min_conf=min_conf)
+                match = find(label, temp_path, exact=exact, min_conf=min_conf, page=page)
                 if match:
                     elapsed = int((time.monotonic() - start_time) * 1000)
                     print(f"[OCR-WAIT] Found '{label}' after {elapsed}ms.")

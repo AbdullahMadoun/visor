@@ -1,7 +1,9 @@
 import os
+import sys
 import json
 import queue
 import time
+import types
 from visor.core import browser, ocr, WORKSPACE_DIR
 
 TRACE_DIR = os.path.join(WORKSPACE_DIR, "logs", "traces")
@@ -21,26 +23,35 @@ class RecorderContext:
 # Active recorder context
 _ctx = RecorderContext("default")
 
-# Module-level aliases for backwards compatibility and test harnesses
-_events = _ctx.events
-_flow_name = _ctx.flow_name
-_recording_active = _ctx.active
-_pending_annotation = _ctx.pending_annotation
-_page_ref = _ctx.page_ref
-_action_queue = _ctx.action_queue
-_scheduled_tasks = _ctx.scheduled_tasks
+# Module-level aliases for backwards compatibility and test harnesses.
+# Each alias is a live property on the module that reads and writes the active
+# context, so `recorder._page_ref = page` reaches the code that uses _ctx.
+_ALIASES = {
+    "_events": "events",
+    "_flow_name": "flow_name",
+    "_recording_active": "active",
+    "_pending_annotation": "pending_annotation",
+    "_page_ref": "page_ref",
+    "_action_queue": "action_queue",
+    "_scheduled_tasks": "scheduled_tasks",
+}
 
 
-def _sync_module_aliases():
-    """Synchronize module-level aliases with active context."""
-    global _events, _flow_name, _recording_active, _pending_annotation, _page_ref, _action_queue, _scheduled_tasks
-    _events = _ctx.events
-    _flow_name = _ctx.flow_name
-    _recording_active = _ctx.active
-    _pending_annotation = _ctx.pending_annotation
-    _page_ref = _ctx.page_ref
-    _action_queue = _ctx.action_queue
-    _scheduled_tasks = _ctx.scheduled_tasks
+def _alias(attr: str) -> property:
+    return property(
+        lambda mod: getattr(mod._ctx, attr),
+        lambda mod, value: setattr(mod._ctx, attr, value),
+    )
+
+
+class _RecorderModule(types.ModuleType):
+    pass
+
+
+for _name, _attr in _ALIASES.items():
+    setattr(_RecorderModule, _name, _alias(_attr))
+
+sys.modules[__name__].__class__ = _RecorderModule
 
 
 def _nearest_label(x: int, y: int, img_path: str) -> str:
@@ -65,10 +76,10 @@ def _nearest_label_from_items(x: int, y: int, items: list) -> str:
     return best or ""
 
 
-def _ocr_texts(img_path: str) -> list:
+def _ocr_texts(img_path: str, page=None) -> list:
     """Return flat list of visible text strings from a screenshot."""
     try:
-        return [r["text"] for r in ocr.find_all(img_path)]
+        return [r["text"] for r in ocr.find_all(img_path, page)]
     except Exception:
         return []
 
@@ -85,7 +96,7 @@ def _capture_after(event: dict, before_label: str, ts: int):
     try:
         after_path = os.path.join(TRACE_DIR, f"{_ctx.flow_name}_{ts}_after.png")
         _ctx.page_ref.screenshot(path=after_path)
-        after_texts = _ocr_texts(after_path)
+        after_texts = _ocr_texts(after_path, _ctx.page_ref)
         is_dynamic = bool(before_label) and before_label not in after_texts
         event["screenshots"]["after"] = after_path
         event["dynamic_label"] = is_dynamic
@@ -118,7 +129,7 @@ def _handle_recorder_api(route, request):
 
 def _process_event(action: dict):
     """Processes a single UI interaction event safely."""
-    global _ctx, _recording_active, _pending_annotation
+    global _ctx
     if not _ctx or not isinstance(action, dict):
         return
 
@@ -133,8 +144,12 @@ def _process_event(action: dict):
         except Exception:
             before_path = None
 
-        # Perform OCR once per click
-        ocr_items = ocr.find_all(before_path) if before_path else []
+        # Perform OCR once per click; an OCR failure must not end the session
+        try:
+            ocr_items = ocr.find_all(before_path, _ctx.page_ref) if before_path else []
+        except Exception as e:
+            print(f"[RECORDER] OCR failed on before-state: {e}")
+            ocr_items = []
         before_texts = [r["text"] for r in ocr_items]
         clicked_label = _nearest_label_from_items(x, y, ocr_items)
 
@@ -148,7 +163,6 @@ def _process_event(action: dict):
         }
         _ctx.events.append(event)
         _ctx.pending_annotation = None
-        _sync_module_aliases()
         print(f"[RECORDER] Click at ({x},{y}) -> '{clicked_label}'")
 
         # Pass event dict reference directly to prevent index drift on undo
@@ -160,18 +174,15 @@ def _process_event(action: dict):
     elif atype == "annotation":
         ann_text = action.get("text", "")
         _ctx.pending_annotation = ann_text
-        _sync_module_aliases()
         print(f"[RECORDER] Annotation queued: '{ann_text}'")
 
     elif atype == "undo":
         if _ctx.events:
             removed = _ctx.events.pop()
-            _sync_module_aliases()
             print(f"[RECORDER] Undid last event: {removed.get('clicked_label')}")
 
     elif atype == "stop":
         _ctx.active = False
-        _sync_module_aliases()
         print("[RECORDER] Stop triggered.")
 
 
@@ -179,7 +190,6 @@ def _inject_recorder(page):
     global _ctx
     if _ctx:
         _ctx.page_ref = page
-    _sync_module_aliases()
 
     page.route("**/visor-api-event", _handle_recorder_api)
     page.add_init_script("""
@@ -285,7 +295,6 @@ def start_recording(flow_name: str, url: str, description: str) -> str:
     global _ctx
     _ctx = RecorderContext(flow_name, url, description)
     _ctx.active = True
-    _sync_module_aliases()
 
     print(f"[RECORDER] Starting recording for '{flow_name}'.")
     page = browser.init_browser(headless=False, record_video=False)
@@ -326,7 +335,10 @@ def start_recording(flow_name: str, url: str, description: str) -> str:
                 pass
 
         while not _ctx.action_queue.empty():
-            _process_event(_ctx.action_queue.get_nowait())
+            try:
+                _process_event(_ctx.action_queue.get_nowait())
+            except Exception as e:
+                print(f"[RECORDER] Dropped event during flush: {e}")
         for execute_at, func in list(_ctx.scheduled_tasks):
             try:
                 func()
@@ -345,6 +357,5 @@ def start_recording(flow_name: str, url: str, description: str) -> str:
 
         print(f"[RECORDER] Saved trace -> {trace_file}")
         _ctx.active = False
-        _sync_module_aliases()
 
     return trace_file

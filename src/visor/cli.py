@@ -69,10 +69,16 @@ def main():
     
     try:
         # Allow loading flows directly by Python file path
-        if args.flow.endswith(".py") or os.path.isfile(args.flow):
+        is_file = args.flow.endswith(".py") or os.path.isfile(args.flow)
+        if is_file:
             import importlib.util
-            spec = importlib.util.spec_from_file_location("user_flow", args.flow)
+            flow_stem = os.path.splitext(os.path.basename(args.flow))[0]
+            # Prefixed so a flow file called e.g. json.py can't shadow a real module
+            module_name = f"visor_user_flow_{flow_stem}"
+            spec = importlib.util.spec_from_file_location(module_name, args.flow)
             module = importlib.util.module_from_spec(spec)
+            # Registered so restart_flow can hot-reload it (see runner._reload_module)
+            sys.modules[module_name] = module
             spec.loader.exec_module(module)
         elif "_" in args.flow:
             platform, flow_name = args.flow.split("_", 1)
@@ -93,9 +99,11 @@ def main():
         
         # Fallback to dynamically guessed names for legacy compatibility
         if not flow_fn:
-            flow_fn_name = args.flow.split("_", 1)[1] if "_" in args.flow else args.flow
-            last_segment = args.flow.split("_")[-1]
-            flow_fn = getattr(module, flow_fn_name, getattr(module, last_segment, None))
+            flow_id = flow_stem if is_file else args.flow
+            flow_fn_name = flow_id.split("_", 1)[1] if "_" in flow_id else flow_id
+            last_segment = flow_id.split("_")[-1]
+            flow_fn = getattr(module, flow_id,
+                              getattr(module, flow_fn_name, getattr(module, last_segment, None)))
         
         if not callable(flow_fn):
             raise AttributeError(f"Could not find callable entry point in {module_name}")
