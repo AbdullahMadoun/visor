@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Form</title>
+<style>
+  body { font: 17px Helvetica, Arial, sans-serif; margin: 40px; }
+  .fancy input { position: absolute; opacity: 0; }       /* styled checkbox: the real input is invisible */
+  .fancy span::before { content: ""; display: inline-block; width: 14px; height: 14px; border: 2px solid #333; margin-right: 8px; vertical-align: -2px; }
+  .fancy input:checked + span::before { background: #333; }
+  .row { margin: 14px 0; }
+  #menu { display: none; border: 1px solid #aaa; width: 160px; }
+  #menu div { padding: 6px 10px; cursor: pointer; }
+  button, .picker { font-size: 16px; padding: 6px 12px; }
+  .picker { border: 1px solid #888; display: inline-block; cursor: pointer; }
+</style></head>
+<body>
+  <div class="row"><label class="fancy"><input type="checkbox" id="remember"><span>Remember me</span></label></div>
+  <div class="row"><input type="checkbox" id="news"> <span>Send me news</span></div>
+  <div class="row">Plan: <label><input type="radio" name="plan" id="basic" checked> Basic</label>
+                         <label><input type="radio" name="plan" id="pro"> Professional</label></div>
+  <div class="row">Color: <div class="picker" id="picker" onclick="document.getElementById('menu').style.display='block'">Choose a color</div>
+    <div id="menu"><div onclick="pick('Red')">Red</div><div onclick="pick('Green')">Green</div><div onclick="pick('Blue')">Blue</div></div></div>
+  <div class="row"><button onclick="document.getElementById('file').click()">Upload resume</button>
+    <input type="file" id="file" style="display:none" onchange="document.getElementById('log').textContent = this.files[0].name"></div>
+  <div class="row"><a href="data:text/plain,hello%20visor" download="report.txt">Export report</a></div>
+  <div id="log">idle</div>
+  <script>function pick(c) { document.getElementById('picker').textContent = c; document.getElementById('menu').style.display = 'none'; }</script>
+</body></html>

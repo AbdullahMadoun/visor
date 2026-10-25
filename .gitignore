@@ -39,6 +39,8 @@ logs/
 
 # Debug HTML dumps
 *.html
+# test fixtures are source, not dumps
+!tests/pages/*.html
 
 # Sensitive config
 secret_ground_truth.json

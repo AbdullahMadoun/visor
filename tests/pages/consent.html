@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Consent</title>
+<style>
+  body { font: 16px Helvetica, Arial, sans-serif; margin: 40px; }
+  #veil { position: fixed; inset: 0; background: rgba(0,0,0,0.25); }
+  #banner { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; padding: 20px; border-top: 1px solid #999; }
+  button { font-size: 16px; padding: 8px 16px; }
+</style></head>
+<body>
+  <h1>Article</h1>
+  <p><button onclick="document.getElementById('log').textContent='continued'">Continue reading</button></p>
+  <div id="log">waiting</div>
+  <div id="veil"></div>
+  <div id="banner">We use cookies to improve your experience.
+    <button onclick="closeBanner('accepted')">Accept all</button>
+    <button onclick="closeBanner('rejected')">Reject all</button>
+  </div>
+  <script>
+    function closeBanner(how) { document.getElementById('veil').remove(); document.getElementById('banner').remove(); document.title = how; }
+  </script>
+</body></html>

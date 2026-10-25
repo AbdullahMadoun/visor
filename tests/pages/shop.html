@@ -1,0 +1,31 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Visor test shop</title>
+<style>
+  body { font: 16px -apple-system, Helvetica, Arial, sans-serif; margin: 24px; }
+  nav { display: flex; gap: 28px; }
+  .card { border: 1px solid #ccc; border-radius: 8px; padding: 12px; width: 220px; display: inline-block; margin-right: 16px; vertical-align: top; }
+  button { font-size: 15px; padding: 8px 14px; }
+  #log { margin: 12px 0; font-weight: bold; }
+  #far { margin-top: 1800px; }
+</style></head>
+<body>
+  <nav><a href="#" onclick="say('nav:Home')">Home</a><a href="#" onclick="say('nav:About us')">About us</a><a href="#" onclick="say('nav:Pricing')">Pricing</a></nav>
+  <p>Click checkout when your cart is ready to finish your order.</p>
+  <div id="log">Ready</div>
+  <div class="card"><div>Red mug</div><button onclick="say('added:Red mug')">Add to cart</button></div>
+  <div class="card"><div>Blue mug</div><button onclick="say('added:Blue mug')">Add to cart</button></div>
+  <p>
+    <button onclick="say('checkout')">Checkout</button>
+    <button id="submit" disabled onclick="say('submitted')">Submit order</button>
+    <button aria-label="Settings" onclick="say('settings')">&#9881;</button>
+    <a href="help.html" target="_blank">Open help</a>
+  </p>
+  <p><label for="email">Email address</label><br><input id="email" style="width:260px"></p>
+  <p><input id="search" placeholder="Search products" style="width:260px"></p>
+  <p>Country <select id="country"><option>Saudi Arabia</option><option>Egypt</option><option>Jordan</option></select></p>
+  <div id="far"><button onclick="say('loaded more')">Load more</button></div>
+  <script>
+    function say(t) { document.getElementById('log').textContent = t; }
+    setTimeout(() => { document.getElementById('submit').disabled = false; }, 1500);
+  </script>
+</body></html>
