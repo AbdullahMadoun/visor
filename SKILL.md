@@ -28,6 +28,24 @@ description: >
 >
 > **STRICT RULE: NO FAKE AUTOMATION & STRICT VERIFICATION.** You are highly prohibited from writing 'demo' scripts that fake workflows. EVERY click must be grounded in genuine visual/OCR state detection, and EVERY action MUST be explicitly verified before reporting success.
 
+## Writing Flows: Use the High-Level API
+
+Flows should call the `visor` API instead of chaining `browser.screenshot()` → `ocr.find()` → `clicker.click()` by hand. Each call already waits, scrolls, closes blocking overlays, picks the real button, verifies the click, and escalates to the strategy tree / `AGENT_NEEDED` while `run_flow` is running:
+
+```python
+import visor
+
+def main(url):
+    visor.goto(url)
+    if visor.see("No longer accepting applications"):   # fatal-state pre-check
+        raise visor.Skip("closed")
+    visor.click("Connect", near="John Smith")           # geometric anchor instead of pixel cutoffs
+    visor.fill("Add a note", "Hi John")
+    visor.click(["Send", "Send now"], expect="Invitation sent")   # verified, with copy variants
+```
+
+Key calls: `click`, `fill`, `check`, `select`, `upload`, `download`, `hover`, `see`, `wait_for`, `wait_gone`, `scroll_to`, `read`, `dismiss_popups`. `visor ocr --url URL --find TEXT` shows exactly what Visor sees. The low-level modules below remain for custom logic.
+
 ## Architecture & Browser Layer
 
 Uses Playwright (`sync_playwright`) with a persistent background profile.

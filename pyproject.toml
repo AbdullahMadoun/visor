@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=61,<80", "wheel"]  # <80: setuptools 80+ breaks `pip install -e` on pip < 21.3
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "visor"
-version = "0.1.0"
-description = "A self-healing, human-in-the-loop browser automation framework that hijacks your local session."
+version = "0.2.0"
+description = "Self-healing browser automation that reads the screen: click, fill and verify by visible text."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -14,14 +14,18 @@ authors = [
 ]
 dependencies = [
     "playwright>=1.39.0",
-    "easyocr>=1.7.1",
-    "Pillow>=10.0.0",
     "opencv-python>=4.8.0",
-    "rich>=13.0.0"
+    "numpy>=1.24.0",
+    "Pillow>=10.0.0",
+    "rich>=13.0.0",
+    # Apple's on-device OCR on macOS; EasyOCR (PyTorch) everywhere else
+    "ocrmac>=1.0.0; sys_platform == 'darwin'",
+    "easyocr>=1.7.1; sys_platform != 'darwin'",
 ]
 
 [project.optional-dependencies]
-mac = ["ocrmac>=0.1.0"]
+easyocr = ["easyocr>=1.7.1"]
+mac = ["ocrmac>=1.0.0"]
 dev = [
     "pytest>=7.4.0"
 ]
@@ -32,3 +36,12 @@ visor = "visor.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+visor = ["strategy/tree.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "browser: needs Chromium (playwright install chromium) and an OCR engine",
+    "network: needs internet access",
+]
