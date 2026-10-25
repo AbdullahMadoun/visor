@@ -53,3 +53,50 @@ def test_screenshot_records_its_scale(live):
     path = browser.screenshot()
     assert ocr._registered_scale(path) is not None
     assert os.path.getsize(path) > 0
+
+
+@pytest.mark.browser
+def test_attached_scripts_share_one_tab(tmp_path, monkeypatch):
+    """Two scripts attached to the same Chrome: the second picks up the first one's tab."""
+    import subprocess
+    import time
+    import urllib.request
+    from playwright.sync_api import sync_playwright
+    from visor.config import settings
+
+    if browser._playwright_context is not None:  # only one sync Playwright may run per thread
+        exe = browser._playwright_context.chromium.executable_path
+    else:
+        with sync_playwright() as pw:
+            exe = pw.chromium.executable_path
+    chrome = subprocess.Popen([exe, "--headless=new", "--remote-debugging-port=9377",
+                               f"--user-data-dir={tmp_path / 'profile'}", "about:blank"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(50):
+            try:
+                urllib.request.urlopen("http://127.0.0.1:9377/json/version", timeout=1)
+                break
+            except OSError:
+                time.sleep(0.2)
+        saved_state = (browser._playwright_context, browser._browser_context, browser._page, browser._owns_browser)
+        browser._browser_context = browser._page = None   # keep the one sync Playwright this thread may run
+        monkeypatch.setattr(browser, "_remembered", None)
+        monkeypatch.setattr(settings, "attach", True)
+        monkeypatch.setattr(settings, "cdp_url", "http://127.0.0.1:9377")
+        monkeypatch.setattr(browser, "ATTACHED_TAB_FILE", str(tmp_path / "attached_tab.json"))
+
+        def script_exits():
+            browser._browser_context.close()  # attached: only disconnects, the tab stays open
+            browser._browser_context = browser._page = None
+            browser._remembered = None
+
+        browser.navigate(page_url("help.html"))           # script 1
+        script_exits()
+
+        assert any("help.html" in p.url for p in browser.tabs())  # first call in script 2 sees every tab
+        assert browser.get_page().url.endswith("help.html")     # and works in the same tab
+        script_exits()
+    finally:
+        chrome.terminate()
+        browser._playwright_context, browser._browser_context, browser._page, browser._owns_browser = saved_state

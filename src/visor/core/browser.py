@@ -1,3 +1,4 @@
+import json
 import os
 import time
 import pathlib
@@ -19,6 +20,8 @@ _crashed = set()  # ids of pages whose renderer crashed
 
 SESSION_FILE = os.path.join(WORKSPACE_DIR, "session.json")
 SCREENS_DIR = os.path.join(WORKSPACE_DIR, "logs", "screens")
+ATTACHED_TAB_FILE = os.path.join(WORKSPACE_DIR, "attached_tab.json")  # visor's tab in an attached browser
+_remembered = None  # id() of the page last written to ATTACHED_TAB_FILE
 
 
 def _cdp_port() -> int:
@@ -43,11 +46,11 @@ def init_browser(headless=None, record_video=False):
         if settings.attach and not record_video:
             try:
                 print("[BROWSER] Attempting to connect to existing Chromium instance...")
-                _browser_context = _playwright_context.chromium.connect_over_cdp(settings.cdp_url, timeout=2000)
+                _browser_context = _playwright_context.chromium.connect_over_cdp(settings.cdp_url, timeout=10000)
                 _owns_browser = False
                 print("[BROWSER] Connected successfully. No context switch needed!")
-            except Exception:
-                pass
+            except Exception as _cdp_err:
+                print(f"[BROWSER] CDP connect error: {_cdp_err}")
 
         if _browser_context is None:
             print(f"[BROWSER] Launching new Playwright Chromium (headless={headless})...")
@@ -90,17 +93,77 @@ def init_browser(headless=None, record_video=False):
                     pass
             try:
                 _page.bring_to_front()
-            except Exception:
-                pass
+            except Exception as _cdp_err:
+                print(f"[BROWSER] CDP connect error: {_cdp_err}")
         else:
             _page = context.new_page()
     else:
-        # Connected via CDP -> do NOT hijack existing tabs or clean them up. Spawn an isolated tab.
-        print("[BROWSER] Spawning isolated tab for CDP session...")
-        _page = context.new_page()
+        # Connected via CDP -> never hijack the user's tabs. Reuse the tab an earlier visor script
+        # worked in (so a page survives from one script to the next), or open an isolated one.
+        _page = _find_remembered_tab(context)
+        if _page is not None:
+            print(f"[BROWSER] Reusing visor's tab from the previous run: {_page.url}")
+            try:
+                _page.bring_to_front()
+            except Exception as _cdp_err:
+                print(f"[BROWSER] CDP connect error: {_cdp_err}")
+        else:
+            print("[BROWSER] Spawning isolated tab for CDP session...")
+            _page = context.new_page()
+        _remember_tab()
 
     _watch(_page)
     return _page
+
+
+def _target_id(page):
+    try:
+        session = page.context.new_cdp_session(page)
+        try:
+            return session.send("Target.getTargetInfo")["targetInfo"]["targetId"]
+        finally:
+            session.detach()
+    except Exception:
+        return None
+
+
+def _find_remembered_tab(context):
+    try:
+        with open(ATTACHED_TAB_FILE) as f:
+            saved = json.load(f).get(settings.cdp_url)
+    except (OSError, ValueError):
+        return None
+    if not saved:
+        return None
+    for page in context.pages:
+        if _alive(page) and _target_id(page) == saved:
+            return page
+    return None
+
+
+def _remember_tab():
+    """Attached mode: note which tab visor is working in, so the next script picks it up again."""
+    global _remembered
+    if _owns_browser or _page is None or _remembered == id(_page):
+        return
+    target = _target_id(_page)
+    if not target:
+        return
+    try:
+        with open(ATTACHED_TAB_FILE) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = {}
+    data[settings.cdp_url] = target
+    try:
+        os.makedirs(os.path.dirname(ATTACHED_TAB_FILE), exist_ok=True)
+        tmp = ATTACHED_TAB_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, ATTACHED_TAB_FILE)
+        _remembered = id(_page)
+    except OSError:
+        pass
 
 
 def _active_context():
@@ -140,6 +203,8 @@ def get_page():
         return init_browser()
     if not _alive(_page):
         return _recover_page()
+    if _remembered != id(_page):
+        _remember_tab()  # the active tab changed (switch_tab, new_tab, a followed popup)
     return _page
 
 
@@ -176,7 +241,7 @@ def _recover_page():
 
 def _reset():
     """Forget every browser handle (the browser died or failed to start)."""
-    global _playwright_context, _browser_context, _page, _owns_browser
+    global _playwright_context, _browser_context, _page, _owns_browser, _remembered
     if _playwright_context is not None:
         try:
             _playwright_context.stop()
@@ -184,6 +249,7 @@ def _reset():
             pass
     _playwright_context = _browser_context = _page = None
     _owns_browser = False
+    _remembered = None
     _popups.clear()
     _tab_stack.clear()
     _watched.clear()
@@ -364,6 +430,7 @@ def follow_popup(since: int, timeout_ms: int = 0):
 
 def tabs() -> list:
     try:
+        get_page()  # attach/launch first, so the first call in a script still sees every tab
         return [p for p in _active_context().pages if _alive(p)]
     except Exception:
         return []
@@ -461,8 +528,8 @@ def close(save=None):
         if _owns_browser:
             try:
                 _browser_context.close()
-            except Exception:
-                pass
+            except Exception as _cdp_err:
+                print(f"[BROWSER] CDP connect error: {_cdp_err}")
         else:
             # Connected via CDP — Browser.close() would tear down the user's browser.
             # Stopping the Playwright driver below detaches without touching it.
