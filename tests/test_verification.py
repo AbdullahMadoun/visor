@@ -136,3 +136,36 @@ def test_goal_checked_on_a_real_page(live, tmp_path):
     assert results == {"Join": "success", "Nothing": "failed"}
     with open(out) as f:
         assert {r["target"]: r["status"] for r in csv.DictReader(f)} == results
+
+
+def test_skip_with_the_goal_on_screen_counts_as_success(fake_page, monkeypatch):
+    monkeypatch.setattr(runner, "goal_met", lambda goal, timeout=None: True)
+    def flow(t):
+        raise runner.Skip("already pending")  # it went straight to Pending, no modal
+    assert runner._run_one(flow, "x", goal="Pending") == "success"
+    monkeypatch.setattr(runner, "goal_met", lambda goal, timeout=None: False)
+    assert runner._run_one(flow, "x", goal="Pending") == "skipped:already pending"
+
+
+def test_failure_json_says_where_the_browser_really_is(monkeypatch, tmp_path):
+    class Page:
+        url = "https://site.test/profile/9"
+    monkeypatch.setattr(runner.browser, "_page", Page())
+    monkeypatch.setattr(runner, "_current_target", "https://site.test/search?q=x")
+    monkeypatch.setattr(settings, "agent", True)
+    monkeypatch.setattr(settings, "agent_timeout", 0.2)
+    monkeypatch.setattr(runner.browser, "wait", lambda ms: None)
+    monkeypatch.setattr(runner, "HANDSHAKE_DIR", str(tmp_path))
+    monkeypatch.setattr(runner, "FAILURE_JSON", str(tmp_path / "failure.json"))
+    monkeypatch.setattr(runner, "FIX_JSON", str(tmp_path / "fix.json"))
+    runner._signal_agent("find_Next", "https://site.test/search?q=x", [], "")
+    payload = json.loads((tmp_path / "failure.json").read_text())
+    assert payload["target"] == "https://site.test/search?q=x"
+    assert payload["page_url"] == "https://site.test/profile/9"
+
+
+def test_goal_can_depend_on_the_target(fake_page, monkeypatch):
+    seen = []
+    monkeypatch.setattr(runner, "goal_met", lambda goal, timeout=None: seen.append(goal) or True)
+    status = runner._run_target(lambda t: "success", "omar", goal=lambda t: f"Booked for {t}")
+    assert status == "success" and seen == ["Booked for omar"]

@@ -52,6 +52,7 @@ GLOBAL_KEY = "_global"
 _probation = []   # [(keys, branch)]
 _rejected = []    # [{"branch": "...", "fix": {...}, "why": "..."}]
 _in_target = False
+_current_target = None
 
 
 def _ts():
@@ -94,6 +95,14 @@ def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str,
         "message": f"AGENT_NEEDED: step='{step}' failed. OCR found: {ocr_found}"
     }
     payload.update({k: v for k, v in context.items() if v})
+    if _current_target:
+        payload["target"] = _current_target
+    try:  # where the browser really is; a flow can wander off its target without noticing
+        page_url = browser._page.url if browser._page is not None else None
+    except Exception:
+        page_url = None
+    if page_url and page_url != url:
+        payload["page_url"] = page_url
     if _rejected:
         payload["rejected_fixes"] = _rejected[-5:]  # earlier answers that were tried and did not work
     _write_json_atomic(FAILURE_JSON, payload)
@@ -171,20 +180,23 @@ def _settle_fix(status: str, url: str) -> str:
     return status
 
 
+def _goal_labels(goal) -> list:
+    return list(goal) if isinstance(goal, (list, tuple)) else [goal]
+
+
 def goal_met(goal, timeout: float = None) -> bool:
     """The goal text is on screen, and still there a moment later: a flash or a glitch doesn't count."""
-    labels = list(goal) if isinstance(goal, (list, tuple)) else [goal]
     try:
-        actions.wait_for(labels, timeout=timeout)
+        actions.wait_for(_goal_labels(goal), timeout=timeout)
     except VisorError:
         return False
     browser.wait(800)
-    return actions.see(labels)
+    return actions.see(_goal_labels(goal))
 
 
 def _goal_not_met(goal, url: str, error: str = None) -> str:
     """The flow ended without its goal on screen: ask the agent why, as for a missing button."""
-    labels = list(goal) if isinstance(goal, (list, tuple)) else [goal]
+    labels = _goal_labels(goal)
     print(f"[GOAL] Not met: none of {labels} is on screen" + (f" (the flow reported: {error})" if error else ""))
     if not settings.agent:
         return "failed"
@@ -420,6 +432,10 @@ def _run_one(flow_fn, url: str, goal=None) -> str:
     try:
         status = _normalize_status(flow_fn(url))
     except Skip as e:
+        # "Already pending" with Pending on screen means the job is done: count it, don't hide it
+        if goal and browser._page is not None and goal_met(goal, timeout=1):
+            print(f"[GOAL] Met; the flow wanted to skip ({e.reason}), so this counts as a success")
+            return "success"
         return f"skipped:{e.reason}"
     except RestartFlow:
         return "restart_flow"
@@ -451,8 +467,10 @@ def _run_one(flow_fn, url: str, goal=None) -> str:
 
 def _run_target(flow_fn, url: str, goal=None) -> str:
     """One target, with its agent fixes settled: proven fixes are saved, failed ones dropped."""
-    global _in_target
-    _in_target = True
+    global _in_target, _current_target
+    _in_target, _current_target = True, url
+    if callable(goal):  # the user's goal for this target, e.g. lambda t: f"Booked for {t}"
+        goal = goal(url)
     try:
         status = _run_one(flow_fn, url, goal)
         for _ in range(2):  # the agent asked to run the target again from the start
@@ -463,7 +481,7 @@ def _run_target(flow_fn, url: str, goal=None) -> str:
         if status == "retry_target":
             status = "failed"
     finally:
-        _in_target = False
+        _in_target, _current_target = False, None
     if _is_done(status):
         _commit_probation(url)
     elif status != "restart_flow":
@@ -499,7 +517,8 @@ def run_flow(flow_fn, targets: list, results_csv: str, max_retries: int = 1, flo
     if goal is None:
         goal = getattr(sys.modules.get(getattr(flow_fn, "__module__", None) or ""), "GOAL", None)
     if goal:
-        print(f"[GOAL] A target counts as done only when {goal!r} is on screen")
+        shown = "the flow's GOAL(target)" if callable(goal) else repr(goal)
+        print(f"[GOAL] A target counts as done only when {shown} is on screen")
     targets = list(dict.fromkeys(t.strip() for t in targets if t and t.strip()))
     results = {t: "pending" for t in targets}
 
