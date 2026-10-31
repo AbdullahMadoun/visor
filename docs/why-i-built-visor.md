@@ -66,9 +66,9 @@ If it hits a captcha or a two-factor prompt, Visor does not try to get around it
 
 I wanted at least some numbers before showing this to anyone. I gave Gemini 3.8 Flash the Visor skill file and some tasks from BU Bench V1 (a mix of Online-Mind2Web, GAIA, BrowseComp and interaction tests). The only way it could touch the web was by writing Python scripts that use Visor. Its built-in browser and screenshot tools were blocked.
 
-So far I've graded 30 of them: **28 passed**, and the 2 failures were timeouts at 20 minutes. The median task took about 8 minutes. And the part I like most: across all 30 runs, the model looked at **zero screenshots**. Everything it knew about the pages came from OCR text.
+So far 30 of the finished runs are graded: **28 passed**, and the 2 failures were timeouts at 20 minutes. The median task took about 8 minutes. And the part I like most: across all 30 runs, the model looked at **zero screenshots**. Everything it knew about the pages came from OCR text.
 
-This is small, graded by me, and there's no baseline yet, so take it as "it works", not "it wins". The full run and a comparison against plain Playwright with the same model are next.
+This is small, it was graded by an AI judge against the gold answers rather than the official one, and there's no baseline yet, so take it as "it works", not "it wins". The full run and a comparison against plain Playwright with the same model are next.
 
 ---
 

@@ -235,7 +235,7 @@ So far, Visor has been run on part of the BU Bench V1 task set (Online-Mind2Web,
 
 Both failures timed out at the 20-minute limit. Median time per task: 7.8 minutes. **The model looked at 0 screenshots in all 30 runs**; everything it knew about the pages came from OCR text.
 
-Read this as a smoke test, not a leaderboard entry: 30 of 100 tasks, graded by hand by me, one model, and no same-model baseline yet. The full run and a comparison against plain Playwright are in progress.
+Read this as a smoke test, not a leaderboard entry: these are the first 30 of 78 finished runs to be graded (100 tasks in the set), one model, and no same-model baseline yet. Grading was done by an AI judge (Claude) against each task's gold answer or the page's success message, with spot checks against the live pages; it is not the benchmark's official judge. The full run and a comparison against plain Playwright are in progress.
 
 ## Help wanted
 
