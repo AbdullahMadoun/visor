@@ -10,8 +10,9 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-    {name = "Abdullah", email = "abdullah@example.com"}
+    {name = "Abdullah Madoun"}
 ]
+keywords = ["browser automation", "ocr", "playwright", "ai agents", "self-healing", "rpa"]
 dependencies = [
     "playwright>=1.39.0",
     "opencv-python>=4.8.0",
@@ -23,11 +24,15 @@ dependencies = [
     "easyocr>=1.7.1; sys_platform != 'darwin'",
 ]
 
+[project.urls]
+Homepage = "https://github.com/AbdullahMadoun/visor"
+Issues = "https://github.com/AbdullahMadoun/visor/issues"
+
 [project.optional-dependencies]
 easyocr = ["easyocr>=1.7.1"]
 mac = ["ocrmac>=1.0.0"]
 dev = [
-    "pytest>=7.4.0"
+    "pytest>=7.4.0",
 ]
 
 [project.scripts]

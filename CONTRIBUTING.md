@@ -9,7 +9,7 @@ Thanks for considering a contribution!
 - `src/visor/core/browser.py`: browser lifecycle, tabs, sessions, visual settling.
 - `src/visor/core/runner.py`: running flows over targets, the strategy tree and the agent handshake.
 - `src/visor/strategy/`: the strategy tree.
-- `src/visor/platforms/`: platform-specific flows (kept out of git).
+- `src/visor/platforms/`: your own site-specific flows (kept out of git).
 - `src/visor/cli.py`: the `visor` command.
 
 ## 💻 Local Development Setup
@@ -33,6 +33,23 @@ The suite runs headless against local pages in `tests/pages/` and needs no inter
 ## 🚀 Adding a Flow
 
 Write a Python file with a `main(target)` function that uses the `visor` API, and run it with `visor run --flow your_flow.py --targets targets.csv`. Return `"success"`, `"failed"` or `"skipped:<reason>"`, return nothing for success, or raise `visor.Skip("reason")`.
+
+## 🐛 Reporting a page Visor gets wrong
+
+The most useful bug report is what Visor saw. Run
+
+```bash
+visor ocr --url https://the-page --find "the text you expected"
+```
+
+and paste the output into the issue, with what you expected to happen. If the page is private, a small HTML file that reproduces the problem is even better: it can become a test page.
+
+## 🎬 Rebuilding the demo GIF
+
+```bash
+python examples/self_healing_demo.py --record
+python scripts/render_demo_gif.py visor_workspace/videos/self_healing.webm examples/self_healing.gif   # needs ffmpeg
+```
 
 ## 🤝 Submitting a PR
 

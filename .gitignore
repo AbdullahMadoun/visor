@@ -19,12 +19,11 @@ build/
 autobot_workspace/
 visor_workspace/
 scratch/
-scripts/
 
 # Ignore all user-specific data and scraping targets
 data/artifacts/
 *.csv
-src/visor/platforms/linkedin/
+src/visor/platforms/*/
 src/visor/logs/
 
 # Ignore all media generated during runs/failures
