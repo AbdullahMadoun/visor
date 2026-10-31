@@ -173,7 +173,7 @@ These rules come from real automation runs. Apply them universally to every new 
 
 ### 1. Hybrid Execution (DOM + OCR)
 While OCR is best for visual perception and state detection, relying purely on OCR to click structural navigation elements (like pagination or form submissions) can fail if they render below the fold or get cropped. 
-**Pattern**: Use the `visor` API first; it scrolls to find text that is off screen. Fall back to DOM locators through `visor.page()` only for what OCR can't see (unlabeled icons, canvas), and leave a comment saying why.
+**Pattern**: Use the `visor` API first; it scrolls to find text that is off screen. Fall back to DOM locators through `visor.page()` only for what OCR can't see (unlabeled icons, canvas), and leave a comment saying why. With `VISOR_OCR_ONLY=1`, `visor.page()` raises: work only from `visor.read()`, `see()`, `find()` and the actions.
 
 ### 2. Forcing Hidden Element Interaction
 Modern web frameworks often visually hide semantic HTML elements (like underlying inputs) behind complex styled containers. Playwright's default interactions will timeout waiting for these elements to become "actionable".

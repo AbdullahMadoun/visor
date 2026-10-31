@@ -96,7 +96,7 @@ visor.goto("example.com")            # https:// added for you; waits until the p
 visor.back(); visor.reload()
 visor.tabs(); visor.switch_tab("Help"); visor.new_tab(url); visor.close_tab()
 visor.screenshot("page.png")
-visor.page()                         # the Playwright page, for anything Visor doesn't cover
+visor.page()                         # the Playwright page, for anything Visor doesn't cover (off with VISOR_OCR_ONLY=1)
 visor.close()                        # saves the session (cookies + storage) when Visor owns the browser
 ```
 
@@ -205,6 +205,7 @@ Set environment variables before starting, or call `visor.configure(...)` at run
 | `ocr_langs` | `VISOR_OCR_LANGS` | | e.g. `en,ar` |
 | `agent` | `VISOR_AGENT` | `True` | wait for `fix.json` on unknown failures |
 | `agent_timeout` | `VISOR_AGENT_TIMEOUT` | `600` | seconds |
+| `ocr_only` | `VISOR_OCR_ONLY` | `False` | switch `visor.page()` off, so your code sees the page only through OCR |
 | `controls` | `VISOR_CONTROLS` | `True` | list on-screen controls (role and accessible name) in `failure.json` |
 | `review` | `VISOR_REVIEW` | `False` | proven fixes wait for `visor tree --review` |
 | `human` | `VISOR_HUMAN` | `True` | pause for you on captchas / 2FA |
@@ -271,10 +272,10 @@ Visor has been run on part of the BU Bench V1 task set (Online-Mind2Web, GAIA, B
 Both failures were 20-minute timeouts. Median time per task: 7.8 minutes. Most of the other timeouts and all 3 give-ups are among the 48 runs not graded yet, so the final rate will be lower; at most 66 of 78 can pass.
 
 What this does and doesn't show, plainly:
-- **It is not an OCR-only test.** The scripts often read page text straight from the DOM through `visor.page()`, and in 3 graded runs the model opened screenshots its own scripts had saved. An earlier version of this README said "0 screenshots"; that was wrong (the counter looked for the wrong tool name).
+- **It is not an OCR-only test.** Every graded run used the raw Playwright page (`visor.page()`) at least once; in 23 of the 30 the scripts ran JavaScript on the page, and in 20 they read text with `inner_text`. In 3 of the 78 runs (all graded) the model opened screenshots its own scripts had saved. An earlier version of this README said "0 screenshots"; that was wrong (the counter looked for the wrong tool name).
 - **Grading:** 11 answers were checked against gold answers, 7 interaction tests against the page's success message, and the rest by an AI judge (Claude) with spot checks. This is not the benchmark's official judge.
 - **Self-healing was off** in these runs (`VISOR_AGENT=0`), and they used an older SKILL.md.
-- One model, no same-model baseline yet. An OCR-only run with DOM reading blocked, the rest of the grading, and a comparison against plain Playwright are next.
+- One model, no same-model baseline yet. An OCR-only run is next (`VISOR_OCR_ONLY=1` switches `visor.page()` off, and the agent's scripts are scanned for DOM reads afterwards), then the rest of the grading and a comparison against plain Playwright.
 
 ## Help wanted
 

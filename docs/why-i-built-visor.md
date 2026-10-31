@@ -69,7 +69,7 @@ I wanted at least some numbers before showing this to anyone. I gave Gemini 3.8 
 
 78 tasks ran. 66 ended with an answer, 9 hit the 20-minute limit and 3 gave up. I've graded 30 so far and **28 passed**; the 2 failures were timeouts. The median task took about 8 minutes.
 
-To be clear about what this shows: the scripts often read page text straight from the DOM through Visor's page handle, and in a few runs the model looked at screenshots its own scripts saved. So it shows a cheap model can get real tasks done with Visor in the loop, not that OCR alone did it. The grading was partly against gold answers and partly by an AI judge, not the official one, and there's no baseline yet. An OCR-only run is next.
+To be clear about what this shows: in most runs the scripts also read page text straight from the DOM through Visor's page handle, and in a few runs the model looked at screenshots its own scripts saved. So it shows a cheap model can get real tasks done with Visor in the loop, not that OCR alone did it. The grading was partly against gold answers and partly by an AI judge, not the official one, and there's no baseline yet. An OCR-only run is next.
 
 ---
 

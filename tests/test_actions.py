@@ -214,3 +214,16 @@ def test_dom_fallback_never_clicks_an_element_hidden_under_another(live):
     assert log_text() == ""
     visor.click("Open settings", timeout=2)  # an uncovered icon button still works
     assert log_text() == "settings"
+
+
+def test_ocr_only_mode_turns_off_the_page_handle(live, monkeypatch):
+    import visor
+    from visor.config import settings
+    visor.goto(page_url("shop.html"))
+    monkeypatch.setattr(settings, "ocr_only", True)
+    with pytest.raises(visor.VisorError, match="OCR-only"):
+        visor.page()
+    assert any("Checkout" in line for line in visor.read())  # reading the screen still works
+    visor.click("Checkout")
+    monkeypatch.setattr(settings, "ocr_only", False)  # the test itself checks the page through the DOM
+    assert log_text() == "checkout"

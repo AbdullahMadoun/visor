@@ -1094,5 +1094,8 @@ def current_url() -> str:
 
 
 def page():
-    """The underlying Playwright page, for anything visor doesn't cover."""
+    """The underlying Playwright page, for anything visor doesn't cover. Off in OCR-only mode."""
+    if settings.ocr_only:
+        raise VisorError("visor.page() is off in OCR-only mode (VISOR_OCR_ONLY=1): read the page with "
+                         "visor.read(), visor.text(), visor.see() or visor.find() instead")
     return browser.get_page()
