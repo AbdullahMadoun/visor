@@ -50,7 +50,7 @@ def main(url):
     visor.click(["Send", "Send now"], expect="Invitation sent")   # verified, with copy variants
 ```
 
-**Always give a flow a `GOAL`.** It is how Visor tells a real success from a script that ran to the end on the wrong page. Pick text that only appears when the job is done ("Pending", "Message sent"), not text that is always there. To start from a recording: `visor record --flow NAME --url URL` writes a flow with an `expect=` per step and a `GOAL`, and replays it once. Read it before trusting it.
+**The user's goal is the success criterion; each step is your judgment.** Every flow gets a `GOAL`: the text that means the user's task is done ("Pending", "Message sent"), taken from what the user asked for, not invented. It is how Visor tells a real success from a script that ran to the end on the wrong page. Don't hard-code success rules for the steps in between: a page changes in too many ways after each action to bound that with fixed rules. When a step or the goal fails, read the OCR text and judge what actually happened. `expect=` is there when one step has a single obvious result, not something to add everywhere. To start from a recording: `visor record --flow NAME --url URL --goal TEXT` writes the flow, with a comment per step saying what appeared or disappeared (evidence, not checks), and replays it once. Read it before trusting it.
 
 Key calls: `click`, `fill`, `check`, `select`, `upload`, `download`, `hover`, `see`, `wait_for`, `wait_gone`, `scroll_to`, `read`, `dismiss_popups`. `visor ocr --url URL --find TEXT` shows exactly what Visor sees. The low-level modules below remain for custom logic.
 

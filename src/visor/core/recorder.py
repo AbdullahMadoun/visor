@@ -1,10 +1,13 @@
 """
 Record a flow by doing it once by hand, then turn it into a flow file that checks itself.
 
-For every action (click, typing, Enter, a choice in a dropdown) the recorder keeps
-what text was on screen before and after it. What appeared becomes the step's
-`expect=`; what the last step made appear becomes the flow's GOAL. The new flow is
-then replayed once, and the file says whether that replay reached the goal.
+The person gives the goal: the text on screen that means the task is done. That is
+the only success check written into the flow. Whether each step in between worked
+is for the agent to judge; a page changes in too many ways after each action for a
+fixed rule to say which change matters. So the recorder keeps what text appeared
+and disappeared after each action, as evidence: in the trace, and as a short
+comment next to each step. The new flow is replayed once, and the file says whether
+that replay reached the goal.
 
 Password and one-time-code fields are never recorded: the flow reads them from
 environment variables instead.
@@ -234,24 +237,17 @@ def _click_label(event: dict, screen: list) -> str:
 
 # ── turning a trace into a flow ──────────────────────────────────────────────
 
-def _pick_expect(appeared: list, label: str = "", typed=()):
-    """
-    Choose the text that proves a step worked, from the texts that appeared after it.
-    Short, wordy text (a status like "Request sent") beats counters, prices and paragraphs.
-    Text the person typed or chose earlier is skipped: the page echoing it back proves nothing.
-    """
-    label_n = ocr.normalize(label)
-    echoes = [ocr.normalize(t) for t in typed if len(ocr.normalize(t)) >= 3]
-    for text in appeared:
-        n = ocr.normalize(text)
-        if not n or n == label_n or len(n) > 40 or len(n.split()) > 6:
-            continue
-        if any(echo in n and len(echo) * 2 >= len(n) for echo in echoes):
-            continue  # "Plan Yearly" after choosing Yearly; "Results for dune" is still fine
-        if sum(c.isalpha() for c in n) < 3:  # "3", "12:04", "$9.99"
-            continue
-        return text
-    return None
+def _evidence(e: dict) -> str:
+    """A short note of what changed after a step, for whoever reads or fixes the flow."""
+    def few(texts):
+        texts = [t if len(t) <= 30 else t[:27] + "..." for t in texts[:3]]
+        return ", ".join(repr(t) for t in texts)
+    parts = []
+    if e.get("appeared"):
+        parts.append("then saw " + few(e["appeared"]))
+    if e.get("disappeared"):
+        parts.append("gone " + few(e["disappeared"]))
+    return "; ".join(parts)
 
 
 def _env_name(label: str) -> str:
@@ -260,10 +256,9 @@ def _env_name(label: str) -> str:
 
 
 def _steps(trace: dict):
-    """The trace as flow steps: ([(call, args, comment)], env vars needed, goal text)."""
-    steps, envs, goal = [], [], None
+    """The trace as flow steps: ([(call, args, comment)], env vars needed)."""
+    steps, envs = [], []
     last_action_at = None
-    typed = []  # values and options the person entered so far
 
     def add(call, *args, comment=""):
         steps.append([call, list(args), comment])
@@ -280,16 +275,13 @@ def _steps(trace: dict):
         last_action_at = e["t"]
         if e.get("note"):
             add("#", comment=e["note"])
-        expect = None
+        seen = _evidence(e)
 
         if kind == "click":
             if not e.get("label"):
                 add("#", comment=f"clicked at ({e['x']:.0f}, {e['y']:.0f}) on something without text: add this step by hand")
                 continue
-            expect = _pick_expect(e.get("appeared", []), e["label"], typed)
-            add("click", repr(e["label"]), *([f"expect={expect!r}"] if expect else []))
-            if not expect and e["label"] in e.get("disappeared", []):
-                add("wait_gone", repr(e["label"]))
+            add("click", repr(e["label"]), comment=seen)
         elif kind == "fill":
             if e.get("secret"):
                 env = _env_name(e["label"])
@@ -297,26 +289,20 @@ def _steps(trace: dict):
                 add("fill", repr(e["label"]), f"os.environ[{env!r}]", comment="value not recorded")
             else:
                 add("fill", repr(e["label"]), repr(e.get("value") or ""))
-                typed.append(e.get("value") or "")
         elif kind == "select":
-            add("select", repr(e["label"]), repr(e["option"]))
-            typed.append(e["option"])
+            add("select", repr(e["label"]), repr(e["option"]), comment=seen)
         elif kind == "enter":
-            expect = _pick_expect(e.get("appeared", []), typed=typed)
             if steps and steps[-1][0] == "fill":
                 steps[-1][1].append("enter=True")
+                steps[-1][2] = "; ".join(c for c in (steps[-1][2], seen) if c)
             else:
-                add("press_key", '"Enter"')
-            if expect:
-                add("wait_for", repr(expect))
-        if expect:
-            goal = expect
-    return steps, sorted(set(envs)), goal
+                add("press_key", '"Enter"', comment=seen)
+    return steps, sorted(set(envs))
 
 
-def synthesize(trace: dict, replay: str = "not run yet") -> str:
-    """Python source for a flow that repeats the trace, with a check after each step."""
-    steps, envs, goal = _steps(trace)
+def synthesize(trace: dict, goal=None, replay: str = "not run yet") -> str:
+    """Python source for a flow that repeats the trace and ends on the person's goal."""
+    steps, envs = _steps(trace)
     doc = [f"Recorded with `visor record` on {trace.get('recorded_at', '')[:10]} from {trace.get('url', '')}"]
     if trace.get("description"):
         doc.append(f"Task: {trace['description']}")
@@ -330,7 +316,7 @@ def synthesize(trace: dict, replay: str = "not run yet") -> str:
         out.append("import os")
     out += ["import visor", "", ""]
     out.append(f"GOAL = {goal!r}" if goal else
-               "GOAL = None  # nothing appeared that proves success: put the text you expect at the end here")
+               "GOAL = None  # put the text that means the task is done here")
     out += ["", "", "def run(target):", "    visor.goto(target)"]
     for call, args, comment in steps:
         if call == "#":
@@ -395,18 +381,26 @@ def replay(flow_path: str, url: str) -> str:
         settings.agent = agent
 
 
-def write_flow(trace: dict, out_path: str, verify: bool = True) -> str:
-    """Write the flow file; replay it once and note the result in the file. Returns that result."""
+def goal_hints(trace: dict) -> list:
+    """Texts that appeared after the last action: candidates the person can pick a goal from."""
+    for e in reversed(trace.get("events", [])):
+        if e["type"] not in ("navigate", "scroll"):
+            return [t for t in e.get("appeared", []) if len(t) <= 60][:8]
+    return []
+
+
+def write_flow(trace: dict, out_path: str, goal=None, verify: bool = True) -> str:
+    """Write the flow file; if there is a goal, replay it once and note the result. Returns that result."""
     with open(out_path, "w") as f:
-        f.write(synthesize(trace))
-    if not verify:
+        f.write(synthesize(trace, goal))
+    if not goal:
+        status = "not run: no goal given"
+    elif not verify:
         status = "skipped (--no-verify)"
-    elif _steps(trace)[2] is None:
-        status = "not run: no goal text to check against"
     else:
         result = replay(out_path, trace["url"])
         status = (f"reached the goal on {trace['url']}" if result == "success"
                   else f"FAILED ({result}); fix this file before using it")
     with open(out_path, "w") as f:
-        f.write(synthesize(trace, replay=status))
+        f.write(synthesize(trace, goal, replay=status))
     return status

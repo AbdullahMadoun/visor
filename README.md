@@ -145,11 +145,13 @@ Results go to `visor_workspace/logs/results.csv` after every target, so you can 
 
 ### Proving it worked
 
-A script that ran without errors hasn't necessarily done its job. It may have clicked the wrong "Next", or the success message may have shown for a moment and gone. So a flow can name its `GOAL`: text that must be on screen when a target is done (also `visor run --goal "Renewed until"` or `run_flow(..., goal=...)`).
+A script that ran without errors hasn't necessarily done its job. It may have clicked the wrong "Next", or the success message may have shown for a moment and gone. So you name the flow's `GOAL`: text that must be on screen when a target is done (also `visor run --goal "Renewed until"` or `run_flow(..., goal=...)`). It can be a function of the target, `GOAL = lambda t: f"Renewed {t}"`, when each target ends differently.
+
+The goal is the one thing you define. Whether each step along the way worked is left to the agent's judgment when something goes wrong, because there are too many ways a page can change to fix that in advance.
 
 - After each target Visor looks for the goal, waits a moment and looks again. Text that flashes and disappears doesn't count.
 - If the goal is missing, the target isn't marked a success, even when the script says it was. The agent is called with `kind: "goal_not_met"` and the screen text, the same way it is for a missing button.
-- If the goal is on screen but the script raised an error (say the confirm dialog never showed because the request went straight through), the target counts as a success.
+- If the goal is on screen but the script raised an error or wanted to skip (say the confirm dialog never showed because the request went straight through), the target counts as a success.
 
 ### Self-healing
 
@@ -171,10 +173,12 @@ Run with `--no-agent` to fail such steps immediately instead of waiting. `visor 
 You can also do a task once by hand and let Visor write the flow:
 
 ```bash
-visor record --flow join --url https://example.com/events/1
+visor record --flow join --url https://example.com/events/1 --goal "You're going"
 ```
 
-Visor opens a tab and watches your clicks, typing, Enter presses and dropdown choices. After each one it notes what text appeared and what disappeared. When you click **Stop**, it writes `join.py`: each click gets an `expect=` taken from what appeared after it, and the last thing that appeared becomes the `GOAL`. Then it replays the new flow once, with no agent, and writes at the top of the file whether the replay reached the goal.
+Visor opens a tab and watches your clicks, typing, Enter presses and dropdown choices. When you click **Stop**, it writes `join.py` with your goal as its `GOAL`. If you didn't pass `--goal`, it shows what appeared after your last step and asks you. Then it replays the new flow once, with no agent, and notes at the top of the file whether the replay reached the goal.
+
+The goal is the only success check Visor writes for you. A page changes in many ways after every click, and no fixed rule can say which change proves a step worked, so Visor doesn't guess. Instead, each step gets a short comment saying what appeared or disappeared after it. That's evidence for you or the agent to judge with, not a check.
 
 Passwords and one-time codes are never recorded. The flow reads them from environment variables instead (`VISOR_PASSWORD` for a field labelled "Password"). Read the file before running it on many targets. The recorder can't tell which typed values should change from target to target.
 

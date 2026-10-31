@@ -31,18 +31,18 @@ TRACE = {
 }
 
 
-def test_flow_checks_each_step_and_ends_with_a_goal():
-    source = recorder.synthesize(TRACE)
+def test_flow_ends_on_the_users_goal_and_keeps_changes_as_notes():
+    source = recorder.synthesize(TRACE, goal="Results for dune")
     compile(source, "club.py", "exec")
     assert "GOAL = 'Results for dune'" in source
-    assert "visor.click('Join club', expect='Welcome aboard')" in source  # not "3", not the echoed choice, not the paragraph
+    assert "expect=" not in source and "wait_for" not in source  # no guessed checks per step
+    assert "visor.click('Join club')  # then saw '3', 'Plan Yearly', 'Welcome aboard'" in source
     assert "visor.fill('Email', 'me@example.com')" in source
     assert "visor.select('Plan', 'Yearly')" in source
     assert "visor.goto('http://club.test/settings')" in source
     assert "club.test/welcome" not in source  # that page load came from the click
-    assert "visor.wait_gone('Delete draft')" in source  # nothing appeared, but the button went away
-    assert "visor.fill('Search', 'dune', enter=True)" in source
-    assert "visor.wait_for('Results for dune')" in source
+    assert "visor.click('Delete draft')  # gone 'Delete draft'" in source
+    assert "visor.fill('Search', 'dune', enter=True)  # then saw 'Results for dune'" in source
     assert "# use the club account" in source
 
 
@@ -52,17 +52,15 @@ def test_passwords_come_from_the_environment():
     assert "import os" in source and "VISOR_PASSWORD" in source.split('"""')[1]
 
 
-def test_no_proof_means_no_goal_and_no_replay(tmp_path):
-    trace = dict(TRACE, events=[event("click", 1, label="Open", appeared=["12:04"], disappeared=[])])
-    assert "GOAL = None" in recorder.synthesize(trace)
-    status = recorder.write_flow(trace, str(tmp_path / "f.py"))
+def test_without_a_goal_nothing_is_guessed_and_nothing_replayed(tmp_path):
+    assert "GOAL = None" in recorder.synthesize(TRACE)
+    status = recorder.write_flow(TRACE, str(tmp_path / "f.py"))
     assert status.startswith("not run")
     assert status in (tmp_path / "f.py").read_text()
 
 
-def test_pick_expect_skips_numbers_long_text_and_the_label_itself():
-    assert recorder._pick_expect(["Join", "$9.99", "x" * 50, "Pending"], "Join") == "Pending"
-    assert recorder._pick_expect(["12", "4:05"]) is None
+def test_goal_hints_come_from_the_last_step():
+    assert recorder.goal_hints(TRACE) == ["Results for dune"]
 
 
 @pytest.mark.browser
@@ -98,6 +96,7 @@ def test_record_a_form_and_replay_it(live, tmp_path, monkeypatch):
     assert not any("Recording" in t for e in trace["events"] for t in e.get("appeared", []))
 
     out = tmp_path / "club.py"
-    status = recorder.write_flow(trace, str(out))
+    assert "Welcome aboard" in recorder.goal_hints(trace)
+    status = recorder.write_flow(trace, str(out), goal="Welcome aboard")
     assert status.startswith("reached the goal"), out.read_text()
     assert "GOAL = 'Welcome aboard'" in out.read_text()

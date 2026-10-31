@@ -4,7 +4,7 @@ visor entry point.
 Usage:
   visor --flow my_flow.py --targets targets.csv    run a flow over every target (same as `visor run`)
   visor run --flow my_flow.py --url https://...     run a flow on one or more URLs
-  visor record --flow name --url URL                 do a task once; get a flow file that checks itself
+  visor record --flow name --url URL [--goal TEXT]   do a task once; get a flow that ends on your goal
   visor login https://example.com                    log in by hand once; later runs reuse the session
   visor ocr [image.png | --url URL] [--find TEXT]    print what visor sees
   visor tree [--serve [--port N]]                    show the learned strategy tree (--serve: live map in the browser)
@@ -162,10 +162,12 @@ def cmd_run(argv: list) -> int:
 def cmd_record(argv: list) -> int:
     parser = argparse.ArgumentParser(
         prog="visor record",
-        description="Do a task once by hand; visor writes a flow file with a check after each step "
-                    "and replays it once to see that it reaches the goal.")
+        description="Do a task once by hand; visor writes it as a flow ending on your goal "
+                    "and replays it once to see that it gets there.")
     parser.add_argument("--flow", required=True, help="name of the new flow")
     parser.add_argument("--url", required=True, help="start URL")
+    parser.add_argument("--goal", action="append",
+                        help="text on screen that means the task is done (asked after recording if missing)")
     parser.add_argument("--description", default="", help="what the task is for (goes in the file)")
     parser.add_argument("--out", help="where to write the flow (default: <flow>.py here)")
     parser.add_argument("--no-verify", action="store_true", help="don't replay the new flow")
@@ -180,7 +182,15 @@ def cmd_record(argv: list) -> int:
     if not trace["events"]:
         print("[RECORDER] Nothing was recorded.")
         return 1
-    status = recorder.write_flow(trace, out, verify=not args.no_verify)
+    goal = args.goal
+    if not goal and sys.stdin.isatty():
+        hints = recorder.goal_hints(trace)
+        if hints:
+            print("[RECORDER] After your last step these appeared: " + ", ".join(repr(h) for h in hints))
+        goal = input("[RECORDER] What text on screen means the task is done? (Enter to leave it for later) ").strip()
+    if isinstance(goal, list) and len(goal) == 1:
+        goal = goal[0]
+    status = recorder.write_flow(trace, out, goal=goal or None, verify=not args.no_verify)
     print(f"\n[RECORDER] Wrote {out}. Replay check: {status}")
     print(f"[RECORDER] Run it with: visor run --flow {out} --url URL")
     return 0 if not status.startswith("FAILED") else 1
