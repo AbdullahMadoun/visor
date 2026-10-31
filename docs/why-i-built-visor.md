@@ -39,7 +39,7 @@ Most browser agents ask an AI model what to do on every single click. That is wh
 Visor flips this around:
 
 * It runs fast, predictable code by default.
-* It clicks what it sees, then checks that the action actually worked (like a button changing to "Pending").
+* It clicks what it sees, then checks that the page reacted, and retries once if nothing happened.
 * Each flow says what "done" looks like on screen. If that text isn't there at the end, it isn't a success, whatever the script thinks.
 * The AI is not driving every second; it is only called in when something unexpected breaks.
 
@@ -51,7 +51,7 @@ When Visor runs into a state it doesn't know, it signals an **AGENT_HANDSHAKE**:
 
 1. It pauses cleanly and writes `failure.json`: the step it was on and every piece of text on screen. No screenshot.
 2. The agent reads that and writes `fix.json` (for example: "if the button is missing and 'More' is visible, open 'More' first").
-3. Visor tries the fix. Only if the job then actually gets done does it save the lesson into its strategy tree, `tree.json`. A fix that didn't work is thrown out, and the agent is told so next time.
+3. Visor tries the fix. Only if the job then actually gets done does it save the lesson into its strategy tree, `tree.json`. A fix that didn't work is thrown out, and the agent is told about it the next time it's asked during that run.
 
 Once Visor learns a fix, it repeats it on future runs without needing the agent again. The tree is plain JSON, so you can read it, edit it, and commit it.
 
@@ -65,11 +65,11 @@ If it hits a captcha or a two-factor prompt, Visor does not try to get around it
 
 ## A small test
 
-I wanted at least some numbers before showing this to anyone. I gave Gemini 3.8 Flash (on its high setting, through the Antigravity CLI) the Visor skill file and some tasks from BU Bench V1 (a mix of Online-Mind2Web, GAIA, BrowseComp and interaction tests). I picked a cheap model on purpose: if a cheap model can drive it, the harness is doing the work. The only way it could touch the web was by writing Python scripts that use Visor. Its built-in browser and screenshot tools were blocked.
+I wanted at least some numbers before showing this to anyone. I gave Gemini 3.8 Flash (on its high setting, through the Antigravity CLI) the Visor skill file and tasks from BU Bench V1 (a mix of Online-Mind2Web, GAIA, BrowseComp, WebBench and interaction tests). I picked a cheap model on purpose: if a cheap model can drive it, the harness is doing a lot of the work. Its built-in browser and screenshot tools were blocked, so it could only use the browser through Python scripts that imported Visor.
 
-So far 30 of the finished runs are graded: **28 passed**, and the 2 failures were timeouts at 20 minutes. The median task took about 8 minutes. And the part I like most: across all 30 runs, the model looked at **zero screenshots**. Everything it knew about the pages came from OCR text.
+78 tasks ran. 66 ended with an answer, 9 hit the 20-minute limit and 3 gave up. I've graded 30 so far and **28 passed**; the 2 failures were timeouts. The median task took about 8 minutes.
 
-This is small, it was graded by an AI judge against the gold answers rather than the official one, and there's no baseline yet, so take it as "it works", not "it wins". The full run and a comparison against plain Playwright with the same model are next.
+To be clear about what this shows: the scripts often read page text straight from the DOM through Visor's page handle, and in a few runs the model looked at screenshots its own scripts saved. So it shows a cheap model can get real tasks done with Visor in the loop, not that OCR alone did it. The grading was partly against gold answers and partly by an AI judge, not the official one, and there's no baseline yet. An OCR-only run is next.
 
 ---
 
@@ -96,6 +96,6 @@ Getting this working smoothly took plenty of trial and error. Some patterns came
 
 For my usage, it works really well. I get zero friction when I ask it to handle the repetitive, boring tasks I dread.
 
-I am not fully sure of the state of the whole ecosystem. [Stagehand](https://docs.stagehand.dev) caches actions and self-heals over the DOM, and [workflow-use](https://github.com/browser-use/workflow-use) replays recorded workflows with an agent fallback. Both are close in spirit. I haven't found one that reads the screen locally and saves the agent's fixes as rules you can read, which is what I wanted.
+I am not fully sure of the state of the whole ecosystem. [Stagehand](https://docs.stagehand.dev) caches actions and self-heals over the DOM, and [workflow-use](https://github.com/browser-use/workflow-use) replays recorded workflows with an agent fallback. Both are close in spirit. Ui.Vision and UiPath now have AI-assisted repair too. I haven't found one that combines local OCR, a text-only handoff any agent can answer, and fixes saved as plain JSON rules you can read, which is what I wanted.
 
 It's MIT licensed, and I'd really like help: Linux and Windows testing, test pages for nasty real-world UI, and adapters so the handshake can be answered by a model API directly. The code is at [github.com/AbdullahMadoun/visor](https://github.com/AbdullahMadoun/visor).

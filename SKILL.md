@@ -16,7 +16,7 @@ description: >
 ## Agent Workflow Rules
 
 1. **Hot-Reloading Strategy Tree**: The strategy tree (`tree.json`) is read from disk on every evaluation. If you encounter an `[AGENT_NEEDED]` pause, you can directly modify `tree.json` to teach the framework a new rule, and then pass `{"action": "retry"}` via `fix.json`. The engine will hot-reload your new rule and apply it immediately—no need to restart the daemon!
-2. **Never Fire-And-Forget Daemons**: When launching long-running tests or scripts in the background, NEVER passively wait. Immediately check the background task logs using your tools (`manage_task` or reading the log file directly). If the daemon gets caught in an interactive handshake (like `[AGENT_NEEDED]`), you must spot it and intervene instantly instead of waiting for a timeout.
+2. **Never Fire-And-Forget Daemons**: When launching long-running tests or scripts in the background, NEVER passively wait. Immediately check the background task's log file. If the daemon gets caught in an interactive handshake (like `[AGENT_NEEDED]`), you must spot it and intervene instantly instead of waiting for a timeout.
 3. **The goal decides, not the script.** An agent is needed whenever the goal is not satisfied, not only when the script raises `AGENT_NEEDED`. A flow that "finished" without its success text on screen (e.g. "Pending", "Message sent") has failed: read the OCR output, find out why, and fix it. Never let a loop exit silently at a dead end when the target count isn't met.
 4. **Five real attempts before asking the human.** Captchas and two-factor prompts go to the human straight away (HUMAN_HANDSHAKE). For anything else, try at least five genuinely different approaches (different wording, `near=`, scrolling, opening menus such as "More", a different page route) before asking for the user's insight.
 5. **The pagination trap.** Infinite scroll is often not infinite: a batch can end in "Show more results" or "Load more". If OCR stops finding new targets, look for those in the OCR output and click them before concluding there are no more.
@@ -34,7 +34,7 @@ description: >
 
 ## Writing Flows: Use the High-Level API
 
-Flows should call the `visor` API instead of chaining `browser.screenshot()` → `ocr.find()` → `clicker.click()` by hand. Each call already waits, scrolls, closes blocking overlays, picks the real button, verifies the click, and escalates to the strategy tree / `AGENT_NEEDED` while `run_flow` is running:
+Flows should call the `visor` API instead of chaining `browser.screenshot()` → `ocr.find()` → `clicker.click()` by hand. Each call already waits, scrolls, closes blocking overlays and picks the real button. `click` also checks that the page reacted, and escalates to the strategy tree / `AGENT_NEEDED` while `run_flow` is running (`fill`, `check`, `select` and `hover` don't escalate):
 
 ```python
 import visor
@@ -56,10 +56,10 @@ Key calls: `click`, `fill`, `check`, `select`, `upload`, `download`, `hover`, `s
 
 ## Architecture & Browser Layer
 
-Uses Playwright (`sync_playwright`) with a persistent background profile.
-- **Headless**: Runs entirely in the background (no window, no stealing physical mouse).
+Uses Playwright (`sync_playwright`) with a fresh browser context that loads the saved session (`session.json`); headed by default.
+- **Headless** (`--headless` / `VISOR_HEADLESS=1`): runs with no window. Headed or not, clicks are sent to the page, not the physical mouse.
 - **Native Clicks (`clicker.py`)**: Uses Playwright CDP (`page.mouse.click(x, y)`) to inject mouse events directly into the Chromium Blink engine. These events bypass Playwright's actionability checks and go through Blink's full hit-testing pipeline.
-- **Coordinates**: Perfectly 1:1 with OCR bounding boxes because CDP operates on internal viewport pixels, completely immune to macOS Display Scaling.
+- **Coordinates**: OCR boxes are converted from screenshot pixels to CSS pixels (Retina scaling included), which is what CDP clicks use.
 
 ## OCR Robustness Rules — Geometric Anchor Strategy
 
@@ -130,7 +130,7 @@ Tells the engine that the objective of the current step was met via manual agent
 
 ## Strategy Tree Structure
 
-`strategy/tree.json` — grows over time, never shrinks:
+`<workspace>/tree.json` (or `VISOR_STRATEGY_TREE`) — grows over time:
 
 ```json
 {
@@ -162,16 +162,16 @@ Tells the engine that the objective of the current step was met via manual agent
 Before marking an automation run as successful, verify the following:
 - **Strict Verification**: Did you visually confirm the target state was rendered after the final interaction?
 - **No Coordinate Hardcoding**: Did you use geometric filters (anchors or relative bounds) to click buttons rather than static pixel coordinates?
-- **Separation of Concerns**: Is all platform-specific code isolated inside `platforms/`, core mechanics in `core/`, and visual recovery paths in `strategy/tree.json`?
+- **Separation of Concerns**: Is all platform-specific code isolated inside `platforms/`, core mechanics in `core/`, and visual recovery paths in `tree.json`?
 - **Portability**: Are all path resolutions relative to `PROJECT_ROOT`?
 
 ## Continuous Learning & Resiliency Patterns
 
-These generalized architectural rules represent hard-won knowledge from thousands of automation runs. Apply them universally to every new flow:
+These rules come from real automation runs. Apply them universally to every new flow:
 
 ### 1. Hybrid Execution (DOM + OCR)
 While OCR is best for visual perception and state detection, relying purely on OCR to click structural navigation elements (like pagination or form submissions) can fail if they render below the fold or get cropped. 
-**Pattern**: Prioritize pure DOM locators (`is_visible()`) for structural navigation. Use OCR purely for understanding the current visual state of the workflow.
+**Pattern**: Use the `visor` API first; it scrolls to find text that is off screen. Fall back to DOM locators through `visor.page()` only for what OCR can't see (unlabeled icons, canvas), and leave a comment saying why.
 
 ### 2. Forcing Hidden Element Interaction
 Modern web frameworks often visually hide semantic HTML elements (like underlying inputs) behind complex styled containers. Playwright's default interactions will timeout waiting for these elements to become "actionable".

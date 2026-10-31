@@ -6,7 +6,7 @@ When something unexpected happens inside a long run, Visor pauses, hands the scr
 
 ![A flow clicks RSVP on three event pages. Page 2 was redesigned, so the agent is called once and its fix is saved; page 3 uses the saved fix with no agent call.](examples/self_healing.gif)
 
-*Three pages, one flow. Page 2 was redesigned: Visor asks the agent once and saves its answer. Page 3 has the same redesign and is solved from the saved fix, with no AI call. Run it yourself, offline: `python examples/self_healing_demo.py`.*
+*Three pages, one flow. Page 2 was redesigned: Visor asks the agent once (a scripted stand-in, so the demo runs offline) and saves its answer. Page 3 has the same redesign and is solved from the saved fix, with no AI call. Run it yourself, offline: `python examples/self_healing_demo.py`.*
 
 ```python
 import visor
@@ -18,7 +18,7 @@ visor.fill("password", "secret", enter=True)
 visor.wait_for("logout")
 ```
 
-**Why it exists.** Agent browsers re-figure out the same task on every run, and pay for a screenshot at every step. Plain scripts are fast but break when a site renames a class. Visor sits in between: it runs ordinary code, sees the page through local OCR, and calls an AI only when something unexpected happens. The AI gets the visible text, not a screenshot, and what it decides is saved as a readable rule. The longer story is in [Why I built Visor](docs/why-i-built-visor.md).
+**Why it exists.** Agent browsers re-figure out the same task on every run, with a model call (and often a screenshot) at every step. Plain scripts are fast but break when a site renames a class. Visor sits in between: it runs ordinary code, sees the page through local OCR, and calls an AI only when something unexpected happens. The AI gets the visible text, not a screenshot, and what it decides is saved as a readable rule. The longer story is in [Why I built Visor](docs/why-i-built-visor.md).
 
 ---
 
@@ -59,7 +59,7 @@ What `click` does for you, in order, until one works:
 2. **Picks the real button.** OCR finds the text; Visor then asks the browser what sits under that pixel. Real controls beat plain text, enabled beats disabled. A button that is visible but disabled is waited on until it enables.
 3. **Hands over walls.** If a captcha or two-factor prompt is on screen, it triggers a **HUMAN_HANDSHAKE**: it pauses, you solve it in the window, and it carries on by itself once the prompt is gone.
 4. **Clears the way.** If a cookie banner or modal covers the target, it presses Escape or closes the overlay ("Reject all" is preferred over "Accept all").
-5. **Scrolls** down (and then up) to find text that is off screen, and stops at the end of the page.
+5. **Scrolls** down (and then up) to find text that is off screen, and gives up after about six screens.
 6. **Icon-only buttons** with no visible text (⚙, ×, 🛒) are found by their accessible name (`aria-label`, `title`, `alt`).
 7. **Verifies the click.** It watches for a page change, a request, navigation, a new tab or a focus change. If absolutely nothing happens, it looks again and clicks once more. If the click opens a new tab, Visor switches to it, and returns to the original tab when that tab closes.
 
@@ -102,7 +102,7 @@ visor.close()                        # saves the session (cookies + storage) whe
 
 **Staying logged in:** run `visor login https://site.com`, log in by hand, press Enter. Later runs start logged in. Delete `visor_workspace/session.json` to log out.
 
-**Using your own Chrome:** start Chrome with `--remote-debugging-port=9222` and Visor attaches to it in its own tab. It never closes your tabs or your browser.
+**Using your own Chrome:** start Chrome with `--remote-debugging-port=9222` and Visor attaches to it in its own tab. It never closes your browser, and only closes the tab it is working in.
 
 ### Errors
 
@@ -112,7 +112,7 @@ visor.close()                        # saves the session (cookies + storage) whe
 | `visor.ElementDisabled` | Found, but the button stayed disabled. |
 | `visor.NavigationError` | A page failed to load. |
 | `visor.Skip("reason")` | Raise it in a flow to skip the current target. |
-| `visor.RestartFlow` | Raise it in a flow to hot-reload your code and retry. |
+| `visor.RestartFlow` | Raise it in a flow to hot-reload your code; the target is run again in the next attempt (needs `--retries 2` or more). |
 
 ---
 
@@ -141,7 +141,7 @@ visor run --flow renew.py --url https://library.example.com/loan/1
 visor run --flow renew.py --targets loans.csv --retries 3 --headless --pace 2-5
 ```
 
-Results go to `visor_workspace/logs/results.csv` after every target, so you can stop with Ctrl+C at any time and run the same command again to resume. Finished and skipped targets are not repeated. Failed targets are retried up to `--retries` times.
+Results go to `logs/results.csv` in the workspace after every target, so you can stop with Ctrl+C at any time and run the same command again to resume. Finished and skipped targets are not repeated. `--retries N` is the total number of attempts (default 1, so failed targets are not retried unless you ask).
 
 ### Proving it worked
 
@@ -159,12 +159,12 @@ While a flow runs, a `visor.click` that cannot find its target doesn't just fail
 
 1. **Strategy tree.** Visor checks `tree.json` for a known fix for this flow and step, such as "if *More* is visible, click it, then look again". Known fixes run instantly, with no AI involved.
 2. **Agent handshake.** If the tree has no answer, Visor writes `agent_handshake/failure.json` (the step, URL and all visible text) and waits for an agent (Claude, Gemini, or you) to write `fix.json`. A fix can include `save_to_tree`, which turns it into a tree branch, and a `reason`, which is saved with it.
-   - **Fixes are on probation.** A new branch is written to `tree.json` only after the target it was made for reaches its goal, and it is saved with the URL that proved it. If the target still fails, the branch is dropped and the next `failure.json` lists it under `rejected_fixes`, so the agent doesn't suggest the same thing again.
-   - **Lessons for every flow.** Branches under the `_global` key apply to all flows (for example, "if *Sold out* is visible, skip"). A flow's own branch wins when both match.
+   - **Fixes are on probation.** A new branch is written to `tree.json` only after the target it was made for succeeds (reaches its `GOAL`, if the flow has one), and it is saved with the URL that proved it. A skip proves nothing, so a skip rule is never saved automatically. If the target still fails, the branch is dropped and the next `failure.json` lists it under `rejected_fixes`, so the agent doesn't suggest the same thing again.
+   - **Lessons shared by flows.** Branches under the `_global` key are used by any flow that has no branch of its own for that step (for example, `_global.find_Apply.not_found.Sold_out_visible`). They are keyed by the label being looked for, like every branch.
 
 3. **Human handshake.** Captchas and 2FA prompts go to you, not the agent (see above). Call `visor.human_handshake("log in please", until="Dashboard")` yourself for anything else only a person should do. It resumes when the text appears, or when you create `agent_handshake/human_done`.
 
-Run with `--no-agent` to fail such steps immediately instead of waiting. `visor tree` prints what has been learned; `visor tree --serve` opens a live map of it in the browser that refreshes as the agent adds branches. The `fix.json` actions (`ocr_click`, `retry`, `skip`, `agent_fixed`, `restart_flow`) are documented in [SKILL.md](SKILL.md).
+Run with `--no-agent` to fail such steps immediately instead of waiting. `visor tree` prints what has been learned; `visor tree --serve` serves a live map of it at http://localhost:8080 that refreshes as the agent adds branches. The `fix.json` actions (`ocr_click`, `retry`, `skip`, `agent_fixed`, `restart_flow`) are documented in [SKILL.md](SKILL.md).
 
 ---
 
@@ -180,13 +180,13 @@ Visor opens a tab and watches your clicks, typing, Enter presses and dropdown ch
 
 The goal is the only success check Visor writes for you. A page changes in many ways after every click, and no fixed rule can say which change proves a step worked, so Visor doesn't guess. Instead, each step gets a short comment saying what appeared or disappeared after it. That's evidence for you or the agent to judge with, not a check.
 
-Passwords and one-time codes are never recorded. The flow reads them from environment variables instead (`VISOR_PASSWORD` for a field labelled "Password"). Read the file before running it on many targets. The recorder can't tell which typed values should change from target to target.
+Password fields, and fields marked as one-time codes, are not recorded; the flow reads them from environment variables instead (`VISOR_PASSWORD` for a field labelled "Password"). A code box that is a plain text field *is* recorded, so check the trace and the file. Read the file before running it on many targets. The recorder can't tell which typed values should change from target to target.
 
 ---
 
 ### Driving Visor from a coding agent
 
-[SKILL.md](SKILL.md) teaches a coding agent (Claude Code, Gemini CLI, Codex and the like) to write Visor flows and to answer `AGENT_NEEDED` pauses itself. Drop it into your agent's skills or instructions. This is how the [benchmark](#a-small-benchmark) runs were driven.
+[SKILL.md](SKILL.md) teaches a coding agent (Claude Code, Gemini CLI, Codex and the like) to write Visor flows and to answer `AGENT_NEEDED` pauses itself. Drop it into your agent's skills or instructions. An earlier version of it drove the [benchmark](#a-small-benchmark) runs.
 
 ---
 
@@ -208,7 +208,7 @@ Set environment variables before starting, or call `visor.configure(...)` at run
 | `human_timeout` | `VISOR_HUMAN_TIMEOUT` | `900` | seconds |
 | `pace` | `VISOR_PACE` | `4-9` | seconds between targets (`0` = none) |
 | `save_session` | `VISOR_SAVE_SESSION` | `True` | save cookies when Visor closes its browser |
-| workspace | `VISOR_WORKSPACE` | `./visor_workspace` | sessions, logs, screenshots, learned tree |
+| workspace | `VISOR_WORKSPACE` | `visor_workspace/` in the clone if it exists, else `./visor_workspace` | sessions, logs, results, learned tree (shared by all flows: set it per project) |
 
 Also: `scroll_search`, `dom_fallback`, `auto_dismiss`, `verify_clicks`, `follow_tabs` (all `True`).
 
@@ -232,7 +232,7 @@ The lower-level modules (`visor.core.ocr`, `browser`, `clicker`, `runner`) are s
 
 - **It needs text to aim at.** Icon-only buttons are found through their accessible name (`aria-label`, `title`, `alt`); an unlabeled icon, a canvas app or a game is out of reach.
 - **The screen is the source of truth, not the only source.** OCR finds the text; the browser is then asked what sits under that pixel, so a real button beats the same word in a paragraph. "No DOM" here means no selectors in your code, not that the DOM is never read.
-- **Same words in two places.** Two "Follow" buttons need `near=`, `index=` or a `region`. Visor picks the main control first, but it can't read your mind.
+- **Same words in two places.** Two "Follow" buttons need `near=`, `index=` or a `region`. When two controls show the same text, Visor takes the first in reading order, so a sidebar "Next" can win over the form's. Say which one with `near=`, `index=` or `region=`.
 - **Chromium only**, through Playwright.
 - **Linux and Windows use EasyOCR**, which is slower and less accurate than Apple's on-device OCR. Most of the testing so far is on macOS.
 - **It does not get around bot protection.** Captchas and two-factor prompts are handed to you. Use it on sites and accounts you're allowed to automate.
@@ -245,14 +245,16 @@ The lower-level modules (`visor.core.ocr`, `browser`, `clicker`, `runner`) are s
 | Agent browsers (screenshot or DOM per step) | a model, every step | the model re-plans, every run | usually nothing |
 | [Stagehand](https://docs.stagehand.dev) | a model over the DOM, cached | cached actions self-heal | cached selectors |
 | [workflow-use](https://github.com/browser-use/workflow-use) | recorded steps | falls back to an agent | the workflow file (self-healing is on its roadmap) |
-| RPA OCR clicks ([Ui.Vision](https://ui.vision), UiPath) | OCR on screen | the macro breaks | your next edit |
+| RPA ([Ui.Vision](https://ui.vision), UiPath) | OCR / computer vision, selectors | AI-assisted repair (Ui.Vision's assistant, UiPath's Healing Agent) | the repaired macro or selector |
 | **Visor** | local OCR, checked against the element under the pixel | strategy tree, then one agent call | a readable rule in `tree.json` |
 
 The bet: for repeatable tasks, the expensive part (a model looking at the page) should happen once per *change*, not once per *step*. The agent can be anything that reads one JSON file and writes another, so Visor isn't tied to a model or an SDK.
 
 ## A small benchmark
 
-So far, Visor has been run on part of the BU Bench V1 task set (Online-Mind2Web, GAIA, BrowseComp, WebBench read tasks and interaction tests). The agent was Gemini 3.8 Flash (high reasoning setting, run through the Antigravity CLI), picked on purpose as a cheap model rather than a frontier one. It reached the web *only* through Python scripts it wrote with Visor: built-in browser, screenshot and web tools were blocked.
+Visor has been run on part of the BU Bench V1 task set (Online-Mind2Web, GAIA, BrowseComp, WebBench read tasks and interaction tests). The agent was Gemini 3.8 Flash (high reasoning setting, run through the Antigravity CLI), picked on purpose as a cheap model rather than a frontier one. Its built-in browser and screenshot tools were blocked; it drove the browser only through Python scripts that imported Visor.
+
+78 tasks ran: 66 ended with an answer, 9 hit the 20-minute limit, and 3 gave up. 30 have been graded so far:
 
 | Category | Passed |
 |---|---|
@@ -261,11 +263,15 @@ So far, Visor has been run on part of the BU Bench V1 task set (Online-Mind2Web,
 | Online-Mind2Web | 7 / 8 |
 | BrowseComp | 4 / 5 |
 | WebBench (read) | 3 / 3 |
-| **Total** | **28 / 30** |
+| **Graded so far** | **28 / 30** |
 
-Both failures timed out at the 20-minute limit. Median time per task: 7.8 minutes. **The model looked at 0 screenshots in all 30 runs**; everything it knew about the pages came from OCR text.
+Both failures were 20-minute timeouts. Median time per task: 7.8 minutes. Most of the other timeouts and all 3 give-ups are among the 48 runs not graded yet, so the final rate will be lower; at most 66 of 78 can pass.
 
-Read this as a smoke test, not a leaderboard entry: these are the first 30 of 78 finished runs to be graded (100 tasks in the set), one model, and no same-model baseline yet. Grading was done by an AI judge (Claude) against each task's gold answer or the page's success message, with spot checks against the live pages; it is not the benchmark's official judge. The full run and a comparison against plain Playwright are in progress.
+What this does and doesn't show, plainly:
+- **It is not an OCR-only test.** The scripts often read page text straight from the DOM through `visor.page()`, and in 3 graded runs the model opened screenshots its own scripts had saved. An earlier version of this README said "0 screenshots"; that was wrong (the counter looked for the wrong tool name).
+- **Grading:** 11 answers were checked against gold answers, 7 interaction tests against the page's success message, and the rest by an AI judge (Claude) with spot checks. This is not the benchmark's official judge.
+- **Self-healing was off** in these runs (`VISOR_AGENT=0`), and they used an older SKILL.md.
+- One model, no same-model baseline yet. An OCR-only run with DOM reading blocked, the rest of the grading, and a comparison against plain Playwright are next.
 
 ## Help wanted
 
@@ -276,7 +282,7 @@ Contributions are welcome, small ones included. Good places to start:
 - **Agent adapters.** A small script that answers `failure.json` using a model API or a local model, so the handshake works without a coding agent watching.
 - **Docs.** If something in this README confused you, that's a bug. Open an issue.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup; the full test suite runs offline in about a minute.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup; the full test suite runs offline in about two minutes.
 
 ---
 
