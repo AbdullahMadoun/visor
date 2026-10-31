@@ -75,14 +75,14 @@ The script pauses and writes `agent_handshake/failure.json` when:
 - An OCR step finds nothing AND no tree branch matches the visible state (`"kind": "text_not_found"`).
 - A target finished but its `GOAL` is not on screen (`"kind": "goal_not_met"`, with `goal` and `error`). The script may have reported success: the goal decides. Find out what really happened from `ocr_results` before answering. `skip` if the target truly can't be done, `restart_flow` after fixing the flow code, or `retry` to run the target again.
 
-`failure.json` also lists `rejected_fixes`: branches you suggested earlier that were tried and did not reach the goal. Don't suggest them again.
+`failure.json` also lists `rejected_fixes`: branches suggested earlier for this flow (in this run or an earlier one) that were tried and did not reach the goal, or that a person rejected in review. Don't suggest them again.
 
 **When AGENT_NEEDED fires:**
 1. **Do NOT just retry the same thing.**
 2. **Read `ocr_results` in `failure.json` — this is your complete perception of the screen.** Every visible string on the page at the moment of failure is in this array. Reason from it. You do NOT need to view the screenshot.
 3. **Generate DIVERGENT Hypotheses (Never Tunnel-Vision)**: Do not get stuck endlessly retrying one failed path. You must explicitly brainstorm multiple, equally smart, laterally divergent paths. Look for "tricks" or alternative ways around the UI. (e.g., Is there a modal? Hit Escape. Is the button hidden? Try zooming out. Is the main flow blocked? Search for an alternative entry point in a dropdown. Can we force it via DOM evaluate?).
 4. **Write fix.json** to mutate the strategy tree, or fix the code and relaunch.
-5. **Your fix is on probation.** A `save_to_tree` branch is written to `tree.json` only after the target reaches its goal. If it doesn't, the branch is thrown away and shows up in `rejected_fixes`. Add a `reason` saying why you think the fix is right; it is saved with the branch.
+5. **Your fix is on probation.** A `save_to_tree` branch is written to `tree.json` only after the target reaches its goal. If it doesn't, the branch is thrown away and shows up in `rejected_fixes`. If the run uses `--review`, a proven branch still waits for a person to approve it with `visor tree --review`. Add a `reason` saying why you think the fix is right; it is saved with the branch.
 
 ## Handshake Protocol Schema (fix.json)
 

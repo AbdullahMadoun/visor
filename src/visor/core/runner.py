@@ -106,8 +106,9 @@ def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str,
         page_url = None
     if page_url and page_url != url:
         payload["page_url"] = page_url
-    if _rejected:
-        payload["rejected_fixes"] = _rejected[-5:]  # earlier answers that were tried and did not work
+    rejected = _rejected_for_agent()
+    if rejected:
+        payload["rejected_fixes"] = rejected  # earlier answers that were tried and did not work
     _write_json_atomic(FAILURE_JSON, payload)
 
     print(f"\n{'='*60}")
@@ -154,24 +155,43 @@ def _hold(fix: dict):
 
 
 def _commit_probation(proof: str):
-    """The fix worked: write its branches to tree.json, noting where it was proven."""
+    """The fix worked: write its branches to tree.json (or, in review mode, to pending.json)."""
     if not _probation:
         return
     tree = strategy_tree.load()
+    pending = strategy_tree.load_side(strategy_tree.PENDING) if settings.review else None
     for keys, branch in _probation:
         branch["proven_on"] = proof
         branch["learned_at"] = datetime.now().isoformat(timespec="seconds")
-        strategy_tree.set_branch(tree, keys, branch)
-    print(f"[TREE] Saved {len(_probation)} proven branch(es)")
+        if pending is None:
+            strategy_tree.set_branch(tree, keys, branch)
+        else:
+            pending.append({"branch": ".".join(keys), "fix": branch})
+    if pending is None:
+        print(f"[TREE] Saved {len(_probation)} proven branch(es)")
+    else:
+        strategy_tree.save_side(strategy_tree.PENDING, pending)
+        print(f"[TREE] {len(_probation)} proven branch(es) waiting for review: run `visor tree --review`")
     _probation.clear()
 
 
 def _reject_probation(why: str):
     """The fix did not work: forget its branches, and tell the agent next time."""
     for keys, branch in _probation:
-        _rejected.append({"branch": ".".join(keys), "fix": branch, "why": why})
+        entry = {"branch": ".".join(keys), "fix": branch, "why": why,
+                 "at": datetime.now().isoformat(timespec="seconds")}
+        _rejected.append(entry)
+        strategy_tree.add_rejected(entry)  # kept for later runs too
         print(f"[TREE] Discarded unproven branch {'.'.join(keys)}: {why}")
     _probation.clear()
+
+
+def _rejected_for_agent(limit: int = 5) -> list:
+    """This run's rejected fixes, plus earlier runs' ones for this flow (or _global): newest last."""
+    flows = {settings.flow, GLOBAL_KEY}
+    earlier = [e for e in strategy_tree.load_side(strategy_tree.REJECTED)
+               if e not in _rejected and e.get("branch", "").split(".")[0] in flows]
+    return (earlier + _rejected)[-limit:]
 
 
 def _settle_fix(status: str, url: str) -> str:

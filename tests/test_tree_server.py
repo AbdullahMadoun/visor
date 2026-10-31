@@ -17,3 +17,15 @@ def test_live_map_shows_branches_and_escapes_page_text(monkeypatch):
     assert "RSVP moved under More" in page and "http://x/2" in page
     assert "<script>alert(1)" not in page
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page
+
+
+def test_live_map_lists_pending_and_rejected_fixes(monkeypatch):
+    sides = {tree.PENDING: [{"branch": "rsvp.find_RSVP.not_found.Menu_visible",
+                             "fix": {"action": "click_ocr", "proven_on": "http://x/3"}}],
+             tree.REJECTED: [{"branch": "rsvp.find_RSVP.not_found.Tab_visible",
+                              "fix": {"action": "click_ocr"}, "why": "<b>still failed</b>"}]}
+    monkeypatch.setattr(tree, "load", lambda: {})
+    monkeypatch.setattr(tree, "load_side", lambda name: sides.get(name, []))
+    html = tree_server.side_lists_html()
+    assert "Waiting for review" in html and "Menu_visible" in html and "http://x/3" in html
+    assert "Recently rejected" in html and "&lt;b&gt;still failed" in html

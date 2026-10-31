@@ -186,3 +186,56 @@ def test_tree_fallback_that_does_not_reveal_the_label_fails(monkeypatch):
     monkeypatch.setattr(runner.actions, "press", lambda m: pressed.append(m))
     assert runner._recover("Submit", "u", "f", False, None, None, "", ["More"]) == "failed"
     assert pressed == []  # and it doesn't click More again (that would close the menu)
+
+
+def _handshake_files(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "agent", True)
+    monkeypatch.setattr(settings, "agent_timeout", 0.2)
+    monkeypatch.setattr(runner, "HANDSHAKE_DIR", str(tmp_path))
+    monkeypatch.setattr(runner, "FAILURE_JSON", str(tmp_path / "failure.json"))
+    monkeypatch.setattr(runner, "FIX_JSON", str(tmp_path / "fix.json"))
+
+
+def test_rejected_fixes_are_remembered_by_the_next_run(tree_file, monkeypatch, tmp_path):
+    runner._hold(FIX)
+    runner._run_target(lambda t: "failed", "https://example.com/event/2")
+    monkeypatch.setattr(runner, "_rejected", [])  # a new run starts with nothing in memory
+    monkeypatch.setattr(settings, "flow", "events")
+    _handshake_files(monkeypatch, tmp_path)
+    runner._signal_agent("find_Join", "https://example.com/event/3", ["More"], "")
+    payload = json.loads((tmp_path / "failure.json").read_text())
+    assert payload["rejected_fixes"][0]["branch"] == "events.find_Join.not_found.More_visible"
+
+
+def test_another_flows_rejected_fixes_are_not_shown(tree_file, monkeypatch, tmp_path):
+    runner._hold(FIX)
+    runner._run_target(lambda t: "failed", "https://example.com/event/2")
+    monkeypatch.setattr(runner, "_rejected", [])
+    monkeypatch.setattr(settings, "flow", "shop")
+    _handshake_files(monkeypatch, tmp_path)
+    runner._signal_agent("find_Buy", "https://example.com/item", ["Cart"], "")
+    assert "rejected_fixes" not in json.loads((tmp_path / "failure.json").read_text())
+
+
+def test_review_mode_holds_proven_fixes_until_approved(tree_file, monkeypatch):
+    monkeypatch.setattr(settings, "review", True)
+    runner._hold(FIX)
+    runner._commit_probation("https://example.com/event/2")
+    assert saved(tree_file) == {}  # proven, but a person hasn't approved it
+    assert strategy_tree.load_side(strategy_tree.PENDING)[0]["branch"] == "events.find_Join.not_found.More_visible"
+    assert strategy_tree.review(ask=lambda prompt: "a") == 0
+    assert saved(tree_file)["events"]["find_Join"]["not_found"]["More_visible"]["target"] == "More"
+    assert strategy_tree.load_side(strategy_tree.PENDING) == []
+
+
+def test_review_can_reject_or_defer(tree_file, monkeypatch):
+    monkeypatch.setattr(settings, "review", True)
+    other = {"save_to_tree": {"events.find_Leave.not_found.Menu_visible": {"action": "click_ocr", "target": "Menu"}}}
+    runner._hold(FIX)
+    runner._hold(other)
+    runner._commit_probation("https://example.com/event/2")
+    answers = iter(["r", ""])
+    assert strategy_tree.review(ask=lambda prompt: next(answers)) == 1
+    assert saved(tree_file) == {}
+    assert strategy_tree.load_side(strategy_tree.REJECTED)[-1]["why"] == "rejected by a reviewer"
+    assert strategy_tree.load_side(strategy_tree.PENDING)[0]["branch"] == "events.find_Leave.not_found.Menu_visible"

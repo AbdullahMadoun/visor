@@ -20,6 +20,66 @@ def save(tree: dict):
     with open(TREE_PATH, "w") as f:
         json.dump(tree, f, indent=2)
 
+# Files kept next to tree.json: fixes that failed (shown to the agent) and, in review mode,
+# proven fixes waiting for a person to approve them
+REJECTED = "rejected.json"
+PENDING = "pending.json"
+MAX_REJECTED = 50
+
+
+def side_path(name: str) -> str:
+    return os.path.join(os.path.dirname(TREE_PATH) or ".", name)
+
+
+def load_side(name: str) -> list:
+    try:
+        with open(side_path(name)) as f:
+            items = json.load(f)
+        return items if isinstance(items, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def save_side(name: str, items: list):
+    path = side_path(name)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(items, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def add_rejected(entry: dict):
+    save_side(REJECTED, (load_side(REJECTED) + [entry])[-MAX_REJECTED:])
+
+
+def review(ask=input) -> int:
+    """
+    Go through proven fixes waiting in pending.json: approve (write to the tree), reject
+    (drop, and tell the agent next time) or leave for later. Returns how many are left.
+    """
+    pending = load_side(PENDING)
+    if not pending:
+        print("[TREE] Nothing waiting for review.")
+        return 0
+    left = []
+    for n, item in enumerate(pending, 1):
+        keys, branch = item["branch"].split("."), item["fix"]
+        print(f"\n({n}/{len(pending)}) {item['branch']}")
+        print(json.dumps(branch, indent=2, ensure_ascii=False))
+        answer = (ask("[a]pprove, [r]eject, or Enter to decide later: ") or "").strip().lower()
+        if answer.startswith("a"):
+            set_branch(load(), keys, branch)
+        elif answer.startswith("r"):
+            add_rejected({"branch": item["branch"], "fix": branch, "why": "rejected by a reviewer"})
+            print(f"[TREE] Rejected {item['branch']}")
+        else:
+            left.append(item)
+    save_side(PENDING, left)
+    print(f"\n[TREE] {len(pending) - len(left)} decided, {len(left)} left for later.")
+    return len(left)
+
+
 def get(tree: dict, *keys):
     """Navigate nested keys, return None if path doesn't exist."""
     node = tree

@@ -7,7 +7,7 @@ Usage:
   visor record --flow name --url URL [--goal TEXT]   do a task once; get a flow that ends on your goal
   visor login https://example.com                    log in by hand once; later runs reuse the session
   visor ocr [image.png | --url URL] [--find TEXT]    print what visor sees
-  visor tree [--serve [--port N]]                    show the learned strategy tree (--serve: live map in the browser)
+  visor tree [--serve [--port N]] [--review]         show the learned strategy tree (--serve: live map; --review: approve fixes)
   visor doctor                                       check the installation
 """
 
@@ -107,6 +107,8 @@ def cmd_run(argv: list) -> int:
     parser.add_argument("--retries", type=int, default=1, help="Max retry loops until 100%% success")
     parser.add_argument("--headless", action="store_true", help="Run the browser without a window")
     parser.add_argument("--no-agent", action="store_true", help="Fail unknown steps instead of waiting for fix.json")
+    parser.add_argument("--review", action="store_true",
+                        help="Proven agent fixes wait for `visor tree --review` instead of going into tree.json")
     parser.add_argument("--agent-timeout", type=float, help="Seconds to wait for an agent fix (default 600)")
     parser.add_argument("--pace", type=_pace, help="Seconds between targets, e.g. 4-9 (default) or 0")
     parser.add_argument("--timeout", type=float, help="Seconds actions keep looking for text (default 8)")
@@ -122,6 +124,8 @@ def cmd_run(argv: list) -> int:
         configure(headless=True)
     if args.no_agent:
         configure(agent=False)
+    if args.review:
+        configure(review=True)
     if args.agent_timeout is not None:
         configure(agent_timeout=args.agent_timeout)
     if args.pace is not None:
@@ -254,7 +258,17 @@ def cmd_tree(argv: list) -> int:
     parser = argparse.ArgumentParser(prog="visor tree", description="Show the learned strategy tree.")
     parser.add_argument("--serve", action="store_true", help="serve a live, auto-refreshing map in the browser")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--review", action="store_true", help="approve or reject proven fixes waiting in review")
     args = parser.parse_args(argv)
+    if args.review:
+        from visor.strategy import tree
+        if not sys.stdin.isatty():
+            for item in tree.load_side(tree.PENDING):
+                print(f"{item['branch']}: {item['fix']}")
+            print("[TREE] Run `visor tree --review` in a terminal to decide on these.")
+            return 0
+        tree.review()
+        return 0
     if args.serve:
         from visor.strategy import tree_server
         tree_server.serve(args.port)

@@ -21,6 +21,7 @@ HTML_TEMPLATE = """
         .target { color: #ce9178; }
         .reason { color: #dcdcaa; font-style: italic; }
         .leaf { background: #2d2d2d; padding: 5px 10px; border-radius: 5px; display: inline-block; border-left: 3px solid #4ec9b0;}
+        h2 { color: #dcdcaa; font-size: 1em; margin-top: 30px; }
         h1 { color: #4ec9b0; border-bottom: 1px solid #404040; padding-bottom: 10px;}
         .status { float: right; font-size: 0.5em; color: #888; }
     </style>
@@ -34,6 +35,7 @@ HTML_TEMPLATE = """
     <ul>
         {{TREE_HTML}}
     </ul>
+    {{SIDE_HTML}}
 </body>
 </html>
 """
@@ -56,6 +58,23 @@ def dict_to_html(d):
     return html
 
 
+def side_lists_html():
+    """Fixes waiting for `visor tree --review`, and the latest ones that failed."""
+    html = ""
+    for title, name, note in (("Waiting for review", tree.PENDING, "proven_on"),
+                              ("Recently rejected", tree.REJECTED, "why")):
+        items = tree.load_side(name)[-10:]
+        if not items:
+            continue
+        rows = "".join(
+            f'<li><div class="leaf"><span class="key">{escape(str(i.get("branch", "")))}</span>'
+            f' &rarr; <span class="action">{escape(str((i.get("fix") or {}).get("action", "")))}</span>'
+            f' | <span class="reason">{escape(str(i.get(note) or (i.get("fix") or {}).get(note, "")))}</span></div></li>'
+            for i in items)
+        html += f"<h2>{title}</h2><ul>{rows}</ul>"
+    return html
+
+
 class TreeHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -72,7 +91,7 @@ class TreeHandler(BaseHTTPRequestHandler):
         if not tree_html:
             tree_html = "<li>No strategy loaded yet.</li>"
             
-        page = HTML_TEMPLATE.replace("{{TREE_HTML}}", tree_html)
+        page = HTML_TEMPLATE.replace("{{TREE_HTML}}", tree_html).replace("{{SIDE_HTML}}", side_lists_html())
         self.wfile.write(page.encode('utf-8'))
 
     def log_message(self, format, *args):
