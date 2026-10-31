@@ -5,7 +5,12 @@ import sys
 # Ensure we can import visor
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
+import pytest
+
 from visor.core import browser, clicker, ocr
+
+# Opens example.com: needs Chromium, an OCR engine and internet
+pytestmark = [pytest.mark.browser, pytest.mark.network]
 
 def test_browser_navigation_and_ocr():
     """
