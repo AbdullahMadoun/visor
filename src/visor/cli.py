@@ -4,7 +4,7 @@ visor entry point.
 Usage:
   visor --flow my_flow.py --targets targets.csv    run a flow over every target (same as `visor run`)
   visor run --flow my_flow.py --url https://...     run a flow on one or more URLs
-  visor record --flow name --url URL --description "goal"
+  visor record --flow name --url URL --description "goal"   (experimental: records clicks only)
   visor login https://example.com                    log in by hand once; later runs reuse the session
   visor ocr [image.png | --url URL] [--find TEXT]    print what visor sees
   visor tree                                         show the learned strategy tree
@@ -156,7 +156,7 @@ def cmd_run(argv: list) -> int:
 
 
 def cmd_record(argv: list) -> int:
-    parser = argparse.ArgumentParser(prog="visor record", description="Record a flow by clicking through it")
+    parser = argparse.ArgumentParser(prog="visor record", description="Experimental: record a flow by clicking through it (clicks only; typing and scrolling are not captured yet)")
     parser.add_argument("--flow", required=True)
     parser.add_argument("--url", required=True, help="Start URL for recording")
     parser.add_argument("--description", required=True, help="Goal description for synthesis")
