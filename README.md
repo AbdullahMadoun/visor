@@ -192,7 +192,7 @@ Visor opens a tab and watches your clicks, typing, Enter presses and dropdown ch
 
 The goal is the only success check Visor writes for you. A page changes in many ways after every click, and no fixed rule can say which change proves a step worked, so Visor doesn't guess. Instead, each step gets a short comment saying what appeared or disappeared after it. That's evidence for you or the agent to judge with, not a check.
 
-Password fields, and fields marked as one-time codes, are not recorded; the flow reads them from environment variables instead (`VISOR_PASSWORD` for a field labelled "Password"). A code box that is a plain text field *is* recorded, so check the trace and the file. Read the file before running it on many targets. The recorder can't tell which typed values should change from target to target.
+Password fields, and fields marked as one-time codes, are not recorded; the flow reads them from environment variables instead (`VISOR_PASSWORD` for a field labelled "Password"). A code box that is a plain text field *is* recorded, so check the trace and the file. Everything you typed or chose is collected in one `VALUES` block at the top of the file. The recorder can't tell which of those should change from target to target, so read the file and edit that block (or compute the value from `target`) before running it on many targets.
 
 ---
 

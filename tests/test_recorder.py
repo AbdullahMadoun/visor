@@ -37,13 +37,24 @@ def test_flow_ends_on_the_users_goal_and_keeps_changes_as_notes():
     assert "GOAL = 'Results for dune'" in source
     assert "expect=" not in source and "wait_for" not in source  # no guessed checks per step
     assert "visor.click('Join club')  # then saw '3', 'Plan Yearly', 'Welcome aboard'" in source
-    assert "visor.fill('Email', 'me@example.com')" in source
-    assert "visor.select('Plan', 'Yearly')" in source
+    assert "visor.fill('Email', VALUES['Email'])" in source
+    assert "visor.select('Plan', VALUES['Plan'])" in source
+    assert "    'Email': 'me@example.com'," in source and "    'Plan': 'Yearly'," in source
     assert "visor.goto('http://club.test/settings')" in source
     assert "club.test/welcome" not in source  # that page load came from the click
     assert "visor.click('Delete draft')  # gone 'Delete draft'" in source
-    assert "visor.fill('Search', 'dune', enter=True)  # then saw 'Results for dune'" in source
+    assert "visor.fill('Search', VALUES['Search'], enter=True)  # then saw 'Results for dune'" in source
     assert "# use the club account" in source
+
+
+def test_the_same_field_typed_twice_keeps_both_values():
+    trace = dict(TRACE, events=[event("fill", 1, label="Name", value="Ann", secret=False),
+                                event("fill", 2, label="Name", value="Bob", secret=False),
+                                event("fill", 3, label="Name", value="Ann", secret=False)])
+    source = recorder.synthesize(trace)
+    compile(source, "f.py", "exec")
+    assert "'Name': 'Ann'," in source and "'Name (2)': 'Bob'," in source
+    assert source.count("VALUES['Name']") == 2 and source.count("VALUES['Name (2)']") == 1
 
 
 def test_passwords_come_from_the_environment():

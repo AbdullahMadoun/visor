@@ -256,12 +256,21 @@ def _env_name(label: str) -> str:
 
 
 def _steps(trace: dict):
-    """The trace as flow steps: ([(call, args, comment)], env vars needed)."""
-    steps, envs = [], []
+    """The trace as flow steps: ([(call, args, comment)], env vars needed, {label: typed value})."""
+    steps, envs, values = [], [], {}
     last_action_at = None
 
     def add(call, *args, comment=""):
         steps.append([call, list(args), comment])
+
+    def value(label, typed):
+        # Every typed value and choice goes in one VALUES block, so the ones that change per target
+        # are edited in one place; the same label typed twice gets its own entry
+        key, n = label, 2
+        while key in values and values[key] != typed:
+            key, n = f"{label} ({n})", n + 1
+        values[key] = typed
+        return f"VALUES[{key!r}]"
 
     for i, e in enumerate(trace.get("events", [])):
         kind = e["type"]
@@ -288,21 +297,21 @@ def _steps(trace: dict):
                 envs.append(env)
                 add("fill", repr(e["label"]), f"os.environ[{env!r}]", comment="value not recorded")
             else:
-                add("fill", repr(e["label"]), repr(e.get("value") or ""))
+                add("fill", repr(e["label"]), value(e["label"], e.get("value") or ""))
         elif kind == "select":
-            add("select", repr(e["label"]), repr(e["option"]), comment=seen)
+            add("select", repr(e["label"]), value(e["label"], e["option"]), comment=seen)
         elif kind == "enter":
             if steps and steps[-1][0] == "fill":
                 steps[-1][1].append("enter=True")
                 steps[-1][2] = "; ".join(c for c in (steps[-1][2], seen) if c)
             else:
                 add("press_key", '"Enter"', comment=seen)
-    return steps, sorted(set(envs))
+    return steps, sorted(set(envs)), values
 
 
 def synthesize(trace: dict, goal=None, replay: str = "not run yet") -> str:
     """Python source for a flow that repeats the trace and ends on the person's goal."""
-    steps, envs = _steps(trace)
+    steps, envs, values = _steps(trace)
     doc = [f"Recorded with `visor record` on {trace.get('recorded_at', '')[:10]} from {trace.get('url', '')}"]
     if trace.get("description"):
         doc.append(f"Task: {trace['description']}")
@@ -317,6 +326,12 @@ def synthesize(trace: dict, goal=None, replay: str = "not run yet") -> str:
     out += ["import visor", "", ""]
     out.append(f"GOAL = {goal!r}" if goal else
                "GOAL = None  # put the text that means the task is done here")
+    if values:
+        out += ["", "# What was typed and chosen while recording. If a value should change from target to target",
+                "# (a name, an amount, a date), compute it from `target` in run() instead.",
+                "VALUES = {"]
+        out += [f"    {k!r}: {v!r}," for k, v in values.items()]
+        out.append("}")
     out += ["", "", "def run(target):", "    visor.goto(target)"]
     for call, args, comment in steps:
         if call == "#":
