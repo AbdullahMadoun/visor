@@ -10,6 +10,7 @@ Thanks for considering a contribution!
 - `src/visor/core/runner.py`: running flows over targets, the strategy tree and the agent handshake.
 - `src/visor/strategy/`: the strategy tree.
 - `src/visor/platforms/`: your own site-specific flows (kept out of git).
+- `src/visor/agent.py`: `visor agent`, which answers the handshake with a model and checks the answers.
 - `src/visor/cli.py`: the `visor` command.
 
 ## 💻 Local Development Setup
@@ -28,7 +29,9 @@ Thanks for considering a contribution!
 pytest
 ```
 
-The suite runs headless against local pages in `tests/pages/` and needs no internet. It uses a throwaway workspace and never attaches to your own Chrome. Browser tests are skipped automatically when Chromium or an OCR engine is missing. When you add a feature that handles a new kind of page element, add a small page under `tests/pages/` and a test that clicks it for real.
+The suite runs headless against local pages in `tests/pages/` and needs no internet. It uses a throwaway workspace and never attaches to your own Chrome. Browser tests are skipped automatically when Chromium or an OCR engine is missing. When you add a feature that handles a new kind of page element, add a small page under `tests/pages/` and a test that clicks it for real. Tests that reproduce a bug should fail without your fix; say so in the PR.
+
+GitHub Actions runs the same suite on every push and pull request: the unit tests on Python 3.9 and 3.13, and the full browser suite on Ubuntu (EasyOCR) and macOS (Apple's OCR).
 
 ## 🚀 Adding a Flow
 

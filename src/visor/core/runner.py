@@ -17,6 +17,9 @@ Flow:
      discarded and listed in the next failure.json as rejected_fixes.
   7. After all targets → report success rate
   8. If < 100% → re-run failed targets (up to max_retries loops)
+
+The run's state (fixes on probation, rejected fixes, the current target) lives in this module,
+so one process runs one flow at a time. Run several flows in separate processes.
 """
 
 import os
