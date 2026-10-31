@@ -176,8 +176,20 @@ def _settle_fix(status: str, url: str) -> str:
     if status in ("failed",):
         _reject_probation(f"the step still failed on {url}")
     elif not _in_target:
-        _commit_probation(url)
+        _end_probation(status, url)
     return status
+
+
+def _end_probation(status: str, url: str):
+    """Only a success proves a fix. A skip proves nothing, so a skip rule is never saved by itself."""
+    if status in DONE_STATUSES:
+        _commit_probation(url)
+    elif status.startswith("skipped"):
+        for keys, _ in _probation:
+            print(f"[TREE] Not saving {'.'.join(keys)}: a skip can't be proven. Add it to tree.json by hand if it's a rule.")
+        _probation.clear()
+    elif status != "restart_flow":
+        _reject_probation(f"the target ended as {status!r}")
 
 
 def _goal_labels(goal) -> list:
@@ -312,6 +324,11 @@ def _recover(label, url, flow_key, retry, bounds, state, img_path, all_text) -> 
                 return f"skipped:{branch.get('reason', 'unknown')}"
             elif branch["action"] == "click_ocr":
                 target = branch["target"]
+                if not retry:
+                    # We are re-checking after this fallback already ran: clicking it again would
+                    # only toggle the menu shut. The label is still missing, so the step failed.
+                    print(f"[TREE] '{label}' still not found after the fallback '{target}'")
+                    return "failed"
 
                 # Maintain bounds mapping even in fallback if applicable
                 target_match = actions.locate(target, exact=bool(bounds), region=bounds, img_path=img_path)
@@ -375,7 +392,8 @@ def _apply_fix(fix, label, url, flow_key, bounds, state) -> str:
                 return ocr_find_and_click(label, url, flow_key, retry=False, bounds=bounds, state=state)
             return "agent_fixed"
     elif fix.get("action") == "retry":
-        return ocr_find_and_click(label, url, flow_key, retry=False, bounds=bounds, state=state)
+        # The agent may have just edited tree.json: apply its branch, then look for the label again
+        return ocr_find_and_click(label, url, flow_key, retry=True, bounds=bounds, state=state)
     elif fix.get("action") == "agent_fixed":
         return "agent_fixed"
     elif fix.get("action") == "restart_flow":
@@ -482,10 +500,7 @@ def _run_target(flow_fn, url: str, goal=None) -> str:
             status = "failed"
     finally:
         _in_target, _current_target = False, None
-    if _is_done(status):
-        _commit_probation(url)
-    elif status != "restart_flow":
-        _reject_probation(f"the target ended as {status!r}")
+    _end_probation(status, url)
     return status
 
 

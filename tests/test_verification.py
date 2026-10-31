@@ -169,3 +169,20 @@ def test_goal_can_depend_on_the_target(fake_page, monkeypatch):
     monkeypatch.setattr(runner, "goal_met", lambda goal, timeout=None: seen.append(goal) or True)
     status = runner._run_target(lambda t: "success", "omar", goal=lambda t: f"Booked for {t}")
     assert status == "success" and seen == ["Booked for omar"]
+
+
+def test_a_skip_never_saves_the_agents_branch(tree_file):
+    runner._hold(dict(FIX, action="skip"))
+    assert runner._run_target(lambda t: "skipped:agent", "https://example.com/event/9") == "skipped:agent"
+    assert saved(tree_file) == {}
+
+
+def test_tree_fallback_that_does_not_reveal_the_label_fails(monkeypatch):
+    # Inside a re-check, a matching branch must not claim success without finding the label
+    tree = {"f": {"find_Submit": {"not_found": {"More_visible": {
+        "action": "click_ocr", "target": "More", "then": "retry_find_Submit"}}}}}
+    monkeypatch.setattr(runner.strategy_tree, "load", lambda: tree)
+    pressed = []
+    monkeypatch.setattr(runner.actions, "press", lambda m: pressed.append(m))
+    assert runner._recover("Submit", "u", "f", False, None, None, "", ["More"]) == "failed"
+    assert pressed == []  # and it doesn't click More again (that would close the menu)
