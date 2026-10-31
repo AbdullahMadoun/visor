@@ -7,7 +7,7 @@ Usage:
   visor record --flow name --url URL --description "goal"   (experimental: records clicks only)
   visor login https://example.com                    log in by hand once; later runs reuse the session
   visor ocr [image.png | --url URL] [--find TEXT]    print what visor sees
-  visor tree                                         show the learned strategy tree
+  visor tree [--serve [--port N]]                    show the learned strategy tree (--serve: live map in the browser)
   visor doctor                                       check the installation
 """
 
@@ -230,6 +230,14 @@ def cmd_ocr(argv: list) -> int:
 
 
 def cmd_tree(argv: list) -> int:
+    parser = argparse.ArgumentParser(prog="visor tree", description="Show the learned strategy tree.")
+    parser.add_argument("--serve", action="store_true", help="serve a live, auto-refreshing map in the browser")
+    parser.add_argument("--port", type=int, default=8080)
+    args = parser.parse_args(argv)
+    if args.serve:
+        from visor.strategy import tree_server
+        tree_server.serve(args.port)
+        return 0
     from visor.strategy import tree
     tree.show_map()
     return 0

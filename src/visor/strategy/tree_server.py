@@ -1,4 +1,6 @@
+"""Live map of tree.json in the browser: `visor tree --serve`."""
 import json
+from html import escape
 from visor.strategy import tree
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -37,21 +39,22 @@ HTML_TEMPLATE = """
 """
 
 def dict_to_html(d):
+    # Branch text comes from web pages via the agent, so escape everything.
     html = ""
     for k, v in d.items():
-        if isinstance(v, dict):
-            if "action" in v:
-                # Leaf node
-                leaf_str = f'<div class="leaf"><span class="key">{k}</span> &rarr; <span class="action">action: {v["action"]}</span>'
-                if "target" in v:
-                    leaf_str += f' | <span class="target">target: "{v["target"]}"</span>'
-                if "reason" in v:
-                    leaf_str += f' | <span class="reason">reason: "{v["reason"]}"</span>'
-                leaf_str += '</div>'
-                html += f"<li>{leaf_str}</li>"
-            else:
-                html += f'<li><span class="key">{k}</span><ul>{dict_to_html(v)}</ul></li>'
+        if not isinstance(v, dict):
+            continue
+        k = escape(str(k))
+        if "action" in v:
+            leaf = f'<div class="leaf"><span class="key">{k}</span> &rarr; <span class="action">action: {escape(str(v["action"]))}</span>'
+            for field, css in (("target", "target"), ("reason", "reason"), ("proven_on", "status")):
+                if field in v:
+                    leaf += f' | <span class="{css}">{field}: "{escape(str(v[field]))}"</span>'
+            html += f"<li>{leaf}</div></li>"
+        else:
+            html += f'<li><span class="key">{k}</span><ul>{dict_to_html(v)}</ul></li>'
     return html
+
 
 class TreeHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -75,8 +78,16 @@ class TreeHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass # Suppress logs to keep terminal clean
 
+def serve(port: int = 8080):
+    server = HTTPServer(("127.0.0.1", port), TreeHandler)
+    print(f"[MAP SERVER] Live map of {tree.TREE_PATH} on http://localhost:{port} (Ctrl+C to stop)")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
 if __name__ == "__main__":
-    port = 8080
-    server = HTTPServer(('localhost', port), TreeHandler)
-    print(f"[MAP SERVER] Running live map on http://localhost:{port}")
-    server.serve_forever()
+    serve()
