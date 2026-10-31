@@ -45,6 +45,9 @@ FAILURES_DIR  = os.path.join(WORKSPACE_DIR, "logs", "failures")
 # Statuses that count as finished when resuming a run
 DONE_STATUSES = ("success", "agent_fixed")
 
+# How many times one target may be restarted (restart_flow) in a row before it counts as failed
+MAX_RESTARTS = 3
+
 # Tree branches every flow can use, e.g. "a 'More' menu hides the button"
 GLOBAL_KEY = "_global"
 
@@ -564,24 +567,27 @@ def run_flow(flow_fn, targets: list, results_csv: str, max_retries: int = 1, flo
             for n, url in enumerate(pending, 1):
                 print(f"\n[TARGET] ({n}/{len(pending)}) {url}")
                 status = _run_target(flow_fn, url, goal)
-
-                if status == "restart_flow":
+                restarts = 0
+                while status == "restart_flow" and restarts < MAX_RESTARTS:
+                    restarts += 1
                     print("[RUNNER] restart_flow requested! Hot-reloading active Python module...")
-                    if hasattr(sys.modules[__name__], '_active_module') and sys.modules[__name__]._active_module:
+                    mod = getattr(sys.modules[__name__], "_active_module", None)
+                    if mod:
                         try:
-                            mod = _reload_module(sys.modules[__name__]._active_module)
+                            mod = _reload_module(mod)
                         except Exception as e:
                             print(f"[ERROR] Hot-reload failed, keeping previous flow: {e}")
-                            results[url] = "failed"
-                            _write_csv(results, results_csv)
-                            continue
+                            status = "failed"
+                            break
                         sys.modules[__name__]._active_module = mod
                         if hasattr(flow_fn, "__name__") and hasattr(mod, flow_fn.__name__):
                             flow_fn = getattr(mod, flow_fn.__name__)
-                        print("[RUNNER] Module reloaded successfully. Retrying target from scratch...")
-                    # Push back into pending to restart from step 1
-                    results[url] = "pending"
-                    continue
+                        print("[RUNNER] Module reloaded successfully.")
+                    print(f"[RUNNER] Running the target again from step 1 (restart {restarts}/{MAX_RESTARTS})")
+                    status = _run_target(flow_fn, url, goal)
+                if status == "restart_flow":
+                    print(f"[RUNNER] Still asking to restart after {MAX_RESTARTS} restarts; marking it failed")
+                    status = "failed"
 
                 results[url] = status
                 print(f"[RESULT] {url} → {status}")

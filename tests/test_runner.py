@@ -65,8 +65,18 @@ def test_restart_flow_retries_the_target(tmp_path, monkeypatch):
         if len(calls) == 1:
             raise RestartFlow()
         return "success"
-    results = runner.run_flow(flow, ["x"], str(tmp_path / "r.csv"), max_retries=2)
-    assert results == {"x": "success"}
+    results = runner.run_flow(flow, ["x"], str(tmp_path / "r.csv"))  # default: one attempt
+    assert results == {"x": "success"} and calls == ["x", "x"]
+
+
+def test_endless_restart_requests_end_as_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "_active_module", None, raising=False)
+    calls = []
+    def flow(t):
+        calls.append(t)
+        raise RestartFlow()
+    results = runner.run_flow(flow, ["x"], str(tmp_path / "r.csv"))
+    assert results == {"x": "failed"} and len(calls) == 1 + runner.MAX_RESTARTS
 
 
 def test_interrupt_saves_progress(tmp_path):
