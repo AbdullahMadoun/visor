@@ -326,6 +326,11 @@ def _contains_words(words: list, sub: list) -> bool:
     return any(words[i:i + n] == sub for i in range(len(words) - n + 1))
 
 
+# Lowest tier that counts as proof that text is on screen (goals, expect=). A fuzzy
+# match lets "Save" pass for "Saved", and a substring lets "Unsent" pass for "Sent".
+PROOF_TIER = 3
+
+
 def _phrase_spans(item: dict, label_norm: str, label_words: list, label_compact: str, exact: bool):
     """Yield (tier, ratio, start, end) for word spans of a phrase that match the label.
 
@@ -334,18 +339,21 @@ def _phrase_spans(item: dict, label_norm: str, label_words: list, label_compact:
     Tier 3: the label is part of one OCR token ("Cart(3)")
     Tier 2: the label is a substring of a word (exact=False only)
     Tier 1: fuzzy match for OCR misreads (labels longer than 4 characters)
+    Tiers 1-2 can aim a click, but never prove a result (see PROOF_TIER).
     """
     words = item.get("words") or [{"text": item["text"]}]
     norms = [w["norm"] if "norm" in w else normalize(w["text"]) for w in words]
     n = len(label_words)
     phrase_len = sum(len(t.split()) for t in norms) or 1
+    # "2/3" is not "23" and not inside "2023": with digits, the gaps between words matter
+    joinable = not any(c.isdigit() for c in label_compact)
     for i in range(len(words)):
         for j in range(i + 1, min(len(words), i + n + 1) + 1):
             span = " ".join(t for t in norms[i:j] if t)
             if not span:
                 continue
             compact = span.replace(" ", "")
-            if span == label_norm or compact == label_compact:
+            if span == label_norm or (joinable and compact == label_compact):
                 if i == 0 and j == len(words):
                     yield (5, 1.0, i, j)
                 elif not exact or phrase_len <= n + 3:  # exact mode: only short phrases, not body text
@@ -354,7 +362,7 @@ def _phrase_spans(item: dict, label_norm: str, label_words: list, label_compact:
             if j - i == 1 and _contains_words(span.split(), label_words) and (not exact or len(span.split()) <= n + 1):
                 yield (3, len(label_compact) / len(compact), i, j)
                 continue
-            if not exact and j - i <= n and label_compact in compact:
+            if not exact and joinable and j - i <= n and label_compact in compact:
                 yield (2, len(label_compact) / len(compact), i, j)
                 continue
             if len(label_compact) > 4 and abs((j - i) - n) <= 1:

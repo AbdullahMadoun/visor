@@ -1,0 +1,31 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Adversarial: two Connect buttons</title>
+<style>
+  body { font: 20px -apple-system, Helvetica, Arial, sans-serif; margin: 40px; }
+  h2 { font-size: 28px; }
+  .row { display: flex; align-items: center; justify-content: space-between; width: 760px;
+         border-bottom: 1px solid #ccc; padding: 18px 0; }
+  .name { font-size: 24px; font-weight: bold; }
+  .headline { font-size: 18px; color: #555; margin-top: 6px; }
+  button { font-size: 20px; padding: 8px 22px; border-radius: 20px; }
+  #log { margin-top: 20px; font-weight: bold; }
+</style></head>
+<body>
+  <h2>People you may know</h2>
+  <!-- One list row per person: name at the left, their own Connect button at the right -->
+  <div class="row" id="card-lina">
+    <div><div class="name">Lina Haddad</div><div class="headline">Data engineer at Aramco</div></div>
+    <button onclick="connect(this, 'Lina Haddad')">Connect</button>
+  </div>
+  <div class="row" id="card-omar">
+    <div><div class="name">Omar Saleh</div><div class="headline">Product designer at Careem</div></div>
+    <button onclick="connect(this, 'Omar Saleh')">Connect</button>
+  </div>
+  <p id="log">Ready</p>
+  <script>
+    function connect(btn, who) {
+      btn.textContent = 'Pending';
+      document.getElementById('log').textContent = 'connect:' + who;
+    }
+  </script>
+</body></html>

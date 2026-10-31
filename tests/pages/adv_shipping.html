@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Adversarial: shipping lines</title>
+<style>
+  body { font: 20px -apple-system, Helvetica, Arial, sans-serif; margin: 40px; }
+  .item { border: 1px solid #ccc; border-radius: 8px; padding: 14px 18px; width: 640px; margin-bottom: 14px; cursor: pointer; }
+  .title { font-size: 24px; font-weight: bold; }
+  .ship { font-size: 20px; margin-top: 6px; }
+  .item a { font-size: 18px; }
+  #log { margin: 16px 0; font-weight: bold; font-size: 22px; }
+</style></head>
+<body>
+  <h2>Kitchen picks</h2>
+  <p id="log">Ready</p>
+  <!-- Only the middle item ships free; "Shipping" alone matches every item and every policy link -->
+  <div class="item" id="item-bottle" onclick="say('picked:Steel water bottle')">
+    <div class="title">Steel water bottle</div>
+    <div class="ship">Shipping: $5.99</div>
+    <a href="#" onclick="event.stopPropagation(); say('policy:Steel water bottle'); return false;">Shipping policy</a>
+  </div>
+  <div class="item" id="item-board" onclick="say('picked:Bamboo cutting board')">
+    <div class="title">Bamboo cutting board</div>
+    <div class="ship">Free Shipping by Amazon</div>
+  </div>
+  <div class="item" id="item-teapot" onclick="say('picked:Ceramic teapot')">
+    <div class="title">Ceramic teapot</div>
+    <div class="ship">Shipping: $5.99</div>
+    <a href="#" onclick="event.stopPropagation(); say('policy:Ceramic teapot'); return false;">Shipping policy</a>
+  </div>
+  <script>
+    function say(t) { document.getElementById('log').textContent = t; }
+  </script>
+</body></html>

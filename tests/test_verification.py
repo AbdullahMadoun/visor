@@ -101,11 +101,11 @@ def test_finished_flow_without_its_goal_fails(fake_page, monkeypatch):
 
 def test_goal_must_still_be_there_a_moment_later(monkeypatch):
     # Seen once, then gone: a flash or a glitch is not success
-    monkeypatch.setattr(runner.actions, "wait_for", lambda labels, timeout=None: {"label": labels[0]})
-    monkeypatch.setattr(runner.actions, "see", lambda labels: False)
+    monkeypatch.setattr(runner.actions, "wait_for", lambda labels, timeout=None, **kw: {"label": labels[0]})
+    monkeypatch.setattr(runner.actions, "see", lambda labels, **kw: False)
     monkeypatch.setattr(runner.browser, "wait", lambda ms: None)
     assert runner.goal_met("Request sent") is False
-    monkeypatch.setattr(runner.actions, "see", lambda labels: True)
+    monkeypatch.setattr(runner.actions, "see", lambda labels, **kw: True)
     assert runner.goal_met("Request sent") is True
 
 

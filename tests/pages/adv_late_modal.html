@@ -1,0 +1,31 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Adversarial: modal that may not come</title>
+<style>
+  body { font: 22px -apple-system, Helvetica, Arial, sans-serif; margin: 40px; }
+  button { font-size: 22px; padding: 10px 26px; }
+  #status { font-size: 28px; font-weight: bold; margin-top: 20px; min-height: 40px; }
+  dialog { font-size: 22px; padding: 28px; border-radius: 10px; }
+  #log { font-size: 20px; color: #555; }
+</style></head>
+<body>
+  <h2>Invite a teammate</h2>
+  <!-- Send normally asks for confirmation; with ?direct=1 the site skips the dialog and is done at once -->
+  <button onclick="send()">Send</button>
+  <p id="status"></p>
+  <p id="log">Ready</p>
+  <dialog id="modal">
+    <p>Send this invitation?</p>
+    <button onclick="confirmSend()">Confirm</button>
+  </dialog>
+  <script>
+    const direct = new URLSearchParams(location.search).get('direct') === '1';
+    function say(t) { document.getElementById('log').textContent = t; }
+    function done() { document.getElementById('status').textContent = 'Pending'; }
+    function send() {
+      say('send');
+      if (direct) { done(); return; }
+      document.getElementById('modal').showModal();
+    }
+    function confirmSend() { document.getElementById('modal').close(); say('confirmed'); done(); }
+  </script>
+</body></html>

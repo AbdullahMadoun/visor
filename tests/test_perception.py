@@ -144,3 +144,21 @@ def test_registered_scale_wins_and_expires_on_rewrite(tmp_path):
     assert ocr._registered_scale(img) == 2.0
     os.utime(img, ns=(1, 1))  # file rewritten by someone else
     assert ocr._registered_scale(img) is None
+
+
+def test_numbers_keep_their_separators():
+    from visor.core import ocr
+    item = {"text": "Posted Oct 23, 2023", "confidence": 1.0, "x": 0, "y": 0, "x1": 0, "y1": 0, "x2": 1, "y2": 1}
+    assert ocr.find_matches("2/3", items=[item]) == []
+    step = dict(item, text="Step 2/3")
+    assert ocr.find_matches("2/3", items=[step])
+
+
+def test_proof_needs_whole_words():
+    from visor.core import ocr
+    def tiers(label, text):
+        item = {"text": text, "confidence": 1.0, "x": 0, "y": 0, "x1": 0, "y1": 0, "x2": 1, "y2": 1}
+        return [m["tier"] for m in ocr.find_matches(label, items=[item])]
+    assert all(t < ocr.PROOF_TIER for t in tiers("Saved", "Save"))     # fuzzy look-alike
+    assert all(t < ocr.PROOF_TIER for t in tiers("Sent", "Unsent"))    # part of another word
+    assert max(tiers("Sent", "Message sent")) >= ocr.PROOF_TIER

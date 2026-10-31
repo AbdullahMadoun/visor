@@ -1,0 +1,43 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Adversarial: two Next buttons</title>
+<style>
+  body { font: 20px -apple-system, Helvetica, Arial, sans-serif; margin: 0; display: flex; }
+  aside { width: 260px; padding: 28px; background: #f3f3f3; min-height: 100vh; box-sizing: border-box; }
+  aside h3 { font-size: 22px; margin-top: 0; }
+  aside a { display: block; margin: 16px 0; color: #0645ad; font-size: 22px; }
+  main { padding: 28px 48px; }
+  h2 { font-size: 30px; margin: 0 0 8px; }
+  #step { font-size: 24px; color: #444; }
+  label { display: block; margin-top: 18px; font-size: 20px; }
+  input { font-size: 20px; padding: 6px; width: 320px; }
+  button { font-size: 22px; padding: 10px 26px; margin-top: 24px; }
+  #log { margin-top: 28px; font-weight: bold; font-size: 22px; }
+</style></head>
+<body>
+  <!-- The trap: a sidebar link that also reads "Next", earlier in reading order than the form's button -->
+  <aside>
+    <h3>Help articles</h3>
+    <a href="#" onclick="say('sidebar:Next'); return false;">Next</a>
+    <a href="#" onclick="say('sidebar:Previous'); return false;">Previous</a>
+    <p id="dates" style="display:none; font-size:20px">Posted Oct 23, 2023</p>
+  </aside>
+  <main>
+    <h2>Create your account</h2>
+    <div id="step">Step 1/3</div>
+    <label>Full name<br><input id="name"></label>
+    <label>Phone<br><input id="phone"></label>
+    <button id="next" onclick="advance()">Next</button>
+    <p id="log">Ready</p>
+  </main>
+  <script>
+    let step = 1;
+    function say(t) { document.getElementById('log').textContent = t; }
+    function advance() {
+      if (step < 3) step += 1;
+      document.getElementById('step').textContent = 'Step ' + step + '/3';
+      say('form:step ' + step);
+    }
+    if (new URLSearchParams(location.search).get('dates') === '1')
+      document.getElementById('dates').style.display = 'block';
+  </script>
+</body></html>

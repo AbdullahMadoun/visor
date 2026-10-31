@@ -187,11 +187,11 @@ def _goal_labels(goal) -> list:
 def goal_met(goal, timeout: float = None) -> bool:
     """The goal text is on screen, and still there a moment later: a flash or a glitch doesn't count."""
     try:
-        actions.wait_for(_goal_labels(goal), timeout=timeout)
+        actions.wait_for(_goal_labels(goal), timeout=timeout, proof=True)
     except VisorError:
         return False
     browser.wait(800)
-    return actions.see(_goal_labels(goal))
+    return actions.see(_goal_labels(goal), proof=True)
 
 
 def _goal_not_met(goal, url: str, error: str = None) -> str:

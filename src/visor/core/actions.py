@@ -246,8 +246,11 @@ def _choose(matches: list, near=None, index: int = None) -> Optional[dict]:
 
 
 def _scan(labels: list, near=None, index: int = None, exact: bool = False, region=None,
-          probe: bool = True, img_path: str = None) -> tuple:
-    """One look at the screen. Returns (best match or None, list of visible texts)."""
+          probe: bool = True, img_path: str = None, proof: bool = False) -> tuple:
+    """
+    One look at the screen. Returns (best match or None, list of visible texts).
+    proof=True: only whole-word matches count, for checking a result rather than aiming a click.
+    """
     img = img_path or look()
     page = browser.get_page()
     items = ocr.find_all(img, page)
@@ -264,6 +267,8 @@ def _scan(labels: list, near=None, index: int = None, exact: bool = False, regio
         matches = ocr.find_matches(label, exact=exact, min_conf=settings.min_conf, items=items)
         if region:
             matches = [m for m in matches if ocr._in_bounds(m, region)]
+        if proof:
+            matches = [m for m in matches if m["tier"] >= ocr.PROOF_TIER]
         if not matches:
             continue
         matches = matches[:12]
@@ -577,9 +582,9 @@ def find_all(label, *, exact: bool = False, region=None) -> list:
     return sorted([m for m in matches if m["tier"] == best], key=lambda m: (m["order"], m["start"]))
 
 
-def see(label, *, exact: bool = False, region=None) -> bool:
-    """Is the text visible right now? (No waiting, no scrolling.)"""
-    found, _ = _scan(_labels(label), exact=exact, region=region, probe=False)
+def see(label, *, exact: bool = False, region=None, proof: bool = False) -> bool:
+    """Is the text visible right now? (No waiting, no scrolling.) proof=True: whole words only."""
+    found, _ = _scan(_labels(label), exact=exact, region=region, probe=False, proof=proof)
     return found is not None
 
 
@@ -796,7 +801,7 @@ def download(label, save_to: str = None, *, near=None, index: int = None, timeou
 
 
 def _expect(label, timeout: float = None) -> Optional[dict]:
-    found, _ = _poll(_labels(label), settings.timeout if timeout is None else timeout, probe=False)
+    found, _ = _poll(_labels(label), settings.timeout if timeout is None else timeout, probe=False, proof=True)
     return found
 
 
@@ -805,11 +810,11 @@ def wait(seconds: float):
     browser.wait(int(seconds * 1000))
 
 
-def wait_for(label, *, timeout: float = None, exact: bool = False, region=None) -> dict:
-    """Wait until the text is visible; returns the match or raises TextNotFound."""
+def wait_for(label, *, timeout: float = None, exact: bool = False, region=None, proof: bool = False) -> dict:
+    """Wait until the text is visible; returns the match or raises TextNotFound. proof=True: whole words only."""
     labels = _labels(label)
     found, visible = _poll(labels, settings.timeout if timeout is None else timeout,
-                           probe=False, exact=exact, region=region)
+                           probe=False, exact=exact, region=region, proof=proof)
     if found is None:
         raise TextNotFound(" / ".join(labels), visible)
     return found

@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Adversarial: flashing toast</title>
+<style>
+  body { font: 22px -apple-system, Helvetica, Arial, sans-serif; margin: 40px; }
+  button { font-size: 22px; padding: 10px 26px; }
+  #status { font-size: 28px; font-weight: bold; min-height: 40px; margin-top: 20px; }
+  #log { font-size: 20px; color: #555; }
+</style></head>
+<body>
+  <h2>Profile settings</h2>
+  <!-- "Saved" shows for 300 ms and vanishes (?stay=1 keeps it): a goal that flashes past is not a goal met.
+       ?button=Update renames the button, so its own text can't be mistaken for the goal "Saved". -->
+  <button id="save" onclick="save()">Save</button>
+  <p id="status"></p>
+  <p id="log">Ready</p>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const stay = params.get('stay') === '1';
+    if (params.get('button')) document.getElementById('save').textContent = params.get('button');
+    function save() {
+      const s = document.getElementById('status');
+      s.textContent = 'Saved';
+      document.getElementById('log').textContent = 'clicked';
+      if (!stay) setTimeout(() => { s.textContent = ''; }, 300);
+    }
+  </script>
+</body></html>
