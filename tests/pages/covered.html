@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Covered</title></head>
+<body style="font: 20px Helvetica, Arial, sans-serif; margin: 40px">
+  <!-- An icon-only link with an accessible name, hidden under a menu item that is painted on top -->
+  <a href="#profile" aria-label="View profile" onclick="log('profile')"
+     style="position:absolute; left:40px; top:120px; width:260px; height:40px; display:block"></a>
+  <div onclick="log('language')"
+       style="position:absolute; left:40px; top:120px; width:260px; height:40px; background:#eee; z-index:2; padding:6px">Language</div>
+  <button aria-label="Open settings" onclick="log('settings')"
+          style="position:absolute; left:40px; top:220px; width:44px; height:44px">&#9881;</button>
+  <p id="log" style="position:absolute; top:320px"></p>
+  <script>function log(t) { document.getElementById('log').textContent = t; }</script>
+</body></html>

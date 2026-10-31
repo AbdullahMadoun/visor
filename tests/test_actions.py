@@ -202,3 +202,15 @@ def test_human_handshake_refuses_in_headless(live):
     visor.goto(page_url("captcha.html"))
     with pytest.raises(visor.VisorError, match="HUMAN_NEEDED"):
         visor.human_handshake("captcha")
+
+
+def test_dom_fallback_never_clicks_an_element_hidden_under_another(live):
+    # Found on LinkedIn: "View profile" existed only as an accessible name, under the menu's
+    # "Language" item; clicking its centre opened language settings.
+    import visor
+    visor.goto(page_url("covered.html"))
+    with pytest.raises(visor.TextNotFound):
+        visor.click("View profile", timeout=2, scroll=False)
+    assert log_text() == ""
+    visor.click("Open settings", timeout=2)  # an uncovered icon button still works
+    assert log_text() == "settings"

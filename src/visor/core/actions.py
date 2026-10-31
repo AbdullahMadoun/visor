@@ -400,6 +400,12 @@ def _scroll_search(labels: list, visible_now: list, **scan) -> Optional[dict]:
     return None
 
 
+_HIT_JS = """(el, [x, y]) => {
+    const top = document.elementFromPoint(x, y);
+    return !!top && (top === el || el.contains(top) || (top.control && top.control === el));
+}"""
+
+
 def _dom_locate(labels: list, purpose: str) -> Optional[dict]:
     """Find an element by accessible name (aria-label, title, alt, label) when OCR sees no text."""
     page = browser.get_page()
@@ -416,14 +422,23 @@ def _dom_locate(labels: list, purpose: str) -> Optional[dict]:
             for build in builders:
                 try:
                     loc = build(label, exact=exact_name).locator("visible=true")
-                    if loc.count() == 0:
+                    found = None
+                    for k in range(min(loc.count(), 5)):
+                        el = loc.nth(k)
+                        el.scroll_into_view_if_needed(timeout=2000)
+                        box = el.bounding_box()
+                        if not box or box["width"] < 1 or box["height"] < 1:
+                            continue
+                        x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+                        # The click lands on whatever is painted at (x, y): it must be this element.
+                        # (On LinkedIn a hidden "View profile" link sat under the menu's "Language".)
+                        if el.evaluate(_HIT_JS, [x, y]):
+                            found = el
+                            break
+                        print(f"[DOM] {label!r} by accessible name is covered at ({x:.0f}, {y:.0f}); not clicking it")
+                    if found is None:
                         continue
-                    el = loc.first
-                    el.scroll_into_view_if_needed(timeout=2000)
-                    box = el.bounding_box()
-                    if not box or box["width"] < 1 or box["height"] < 1:
-                        continue
-                    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+                    el = found
                     print(f"[DOM] Found {label!r} by accessible name at ({x:.0f}, {y:.0f}) — no visible text")
                     return {"text": label, "label": label, "x": int(x), "y": int(y),
                             "x1": int(box["x"]), "y1": int(box["y"]),
