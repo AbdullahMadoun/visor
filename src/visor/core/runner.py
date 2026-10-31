@@ -9,8 +9,14 @@ Flow:
   4b. Not found → check strategy tree for known fix
       4b-i.  Known fix → apply → retry
       4b-ii. Unknown  → save failure context → print AGENT_NEEDED → poll for fix.json
-  5. After all targets → report success rate
-  6. If < 100% → re-run failed targets (up to max_retries loops)
+  5. If the flow declares a GOAL: the goal text must be on screen at the end, on two
+     reads a moment apart. Not there → the target failed, whatever the clicks reported,
+     and the agent is asked why (kind "goal_not_met").
+  6. Agent fixes are on probation: their save_to_tree branches are written to tree.json
+     only after the target they were made for succeeds. Fixes that don't survive are
+     discarded and listed in the next failure.json as rejected_fixes.
+  7. After all targets → report success rate
+  8. If < 100% → re-run failed targets (up to max_retries loops)
 """
 
 import os
@@ -39,6 +45,14 @@ FAILURES_DIR  = os.path.join(WORKSPACE_DIR, "logs", "failures")
 # Statuses that count as finished when resuming a run
 DONE_STATUSES = ("success", "agent_fixed")
 
+# Tree branches every flow can use, e.g. "a 'More' menu hides the button"
+GLOBAL_KEY = "_global"
+
+# Agent fixes waiting for proof, and fixes that failed it (shown to the agent next time)
+_probation = []   # [(keys, branch)]
+_rejected = []    # [{"branch": "...", "fix": {...}, "why": "..."}]
+_in_target = False
+
 
 def _ts():
     return datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -55,7 +69,8 @@ def _write_json_atomic(path: str, payload: dict):
         json.dump(payload, f, indent=2, ensure_ascii=False)
     os.replace(tmp, path)
 
-def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str):
+def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str,
+                  kind: str = "text_not_found", **context):
     """
     Write failure context to failure.json and block until agent writes fix.json.
     The agent diagnoses purely from ocr_results — screenshot_path is an audit trail only.
@@ -74,9 +89,13 @@ def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str):
         "url": url,
         "step": step,
         "screenshot_path": screenshot_path,   # audit trail — agent does NOT read this
+        "kind": kind,                         # text_not_found | goal_not_met
         "ocr_results": ocr_found,             # full list of every visible string — THIS is what the agent reads
         "message": f"AGENT_NEEDED: step='{step}' failed. OCR found: {ocr_found}"
     }
+    payload.update({k: v for k, v in context.items() if v})
+    if _rejected:
+        payload["rejected_fixes"] = _rejected[-5:]  # earlier answers that were tried and did not work
     _write_json_atomic(FAILURE_JSON, payload)
 
     print(f"\n{'='*60}")
@@ -98,12 +117,8 @@ def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str):
                 if os.path.exists(FAILURE_JSON):
                     os.remove(FAILURE_JSON)
                 print(f"[AGENT_FIX] Received: {fix}")
-                # If tree update included, persist to disk
-                if "save_to_tree" in fix:
-                    tree = strategy_tree.load()
-                    for path_str, value in fix["save_to_tree"].items():
-                        keys = path_str.split(".")
-                        strategy_tree.set_branch(tree, keys, value)
+                # Tree updates wait until the fix is proven (see _settle_fix / _end_target)
+                _hold(fix)
                 return fix
             except json.JSONDecodeError:
                 # File is actively being written by agent, wait for next tick
@@ -112,6 +127,88 @@ def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str):
 
     print("[AGENT_NEEDED] Timed out waiting for fix. Skipping.")
     return {"action": "skip", "reason": "agent_timeout"}
+
+
+def _hold(fix: dict):
+    """Keep a fix's save_to_tree branches on probation until the step or target they were for succeeds."""
+    for path_str, value in (fix.get("save_to_tree") or {}).items():
+        branch = dict(value)
+        reason = fix.get("reason") or fix.get("note")
+        if reason:
+            branch.setdefault("reason", reason)
+        _probation.append((path_str.split("."), branch))
+    if fix.get("save_to_tree"):
+        print(f"[TREE] {len(fix['save_to_tree'])} branch(es) on probation until the fix is proven")
+
+
+def _commit_probation(proof: str):
+    """The fix worked: write its branches to tree.json, noting where it was proven."""
+    if not _probation:
+        return
+    tree = strategy_tree.load()
+    for keys, branch in _probation:
+        branch["proven_on"] = proof
+        branch["learned_at"] = datetime.now().isoformat(timespec="seconds")
+        strategy_tree.set_branch(tree, keys, branch)
+    print(f"[TREE] Saved {len(_probation)} proven branch(es)")
+    _probation.clear()
+
+
+def _reject_probation(why: str):
+    """The fix did not work: forget its branches, and tell the agent next time."""
+    for keys, branch in _probation:
+        _rejected.append({"branch": ".".join(keys), "fix": branch, "why": why})
+        print(f"[TREE] Discarded unproven branch {'.'.join(keys)}: {why}")
+    _probation.clear()
+
+
+def _settle_fix(status: str, url: str) -> str:
+    """After a healed step: outside a run the step's own result is the proof; inside a run, the target's."""
+    if status in ("failed",):
+        _reject_probation(f"the step still failed on {url}")
+    elif not _in_target:
+        _commit_probation(url)
+    return status
+
+
+def goal_met(goal, timeout: float = None) -> bool:
+    """The goal text is on screen, and still there a moment later: a flash or a glitch doesn't count."""
+    labels = list(goal) if isinstance(goal, (list, tuple)) else [goal]
+    try:
+        actions.wait_for(labels, timeout=timeout)
+    except VisorError:
+        return False
+    browser.wait(800)
+    return actions.see(labels)
+
+
+def _goal_not_met(goal, url: str, error: str = None) -> str:
+    """The flow ended without its goal on screen: ask the agent why, as for a missing button."""
+    labels = list(goal) if isinstance(goal, (list, tuple)) else [goal]
+    print(f"[GOAL] Not met: none of {labels} is on screen" + (f" (the flow reported: {error})" if error else ""))
+    if not settings.agent:
+        return "failed"
+    try:
+        visible = actions.read()
+    except Exception:
+        visible = []
+    fix = _signal_agent(f"goal:{' / '.join(labels)}", browser.get_page().url, visible,
+                        _save_screenshot("goal_not_met"), kind="goal_not_met", goal=labels, error=error)
+    action = fix.get("action")
+    if action == "skip":
+        return f"skipped:{fix.get('reason', 'agent')}"
+    if action == "restart_flow":
+        return "restart_flow"
+    if action == "retry":
+        return "retry_target"
+    if action == "ocr_click":
+        match = actions.locate(fix["target"])
+        if match:
+            actions.press(match)
+            clicker.short_wait()
+    if action in ("ocr_click", "agent_fixed"):
+        return "success" if goal_met(goal) else "failed"
+    return "failed"
 
 
 def safe_dom_action(func, *args, **kwargs):
@@ -189,6 +286,9 @@ def _recover(label, url, flow_key, retry, bounds, state, img_path, all_text) -> 
         not_found_branches = strategy_tree.get(tree, flow_key, state, f"find_{label.replace(' ', '_')}", "not_found") or {}
     if not not_found_branches:
         not_found_branches = strategy_tree.get(tree, flow_key, f"find_{label.replace(' ', '_')}", "not_found") or {}
+    if not not_found_branches:
+        # Lessons about how the web works, shared by every flow
+        not_found_branches = strategy_tree.get(tree, GLOBAL_KEY, f"find_{label.replace(' ', '_')}", "not_found") or {}
 
     # Specific conditions first; a "default" branch applies when none of them match
     for condition, branch in sorted(not_found_branches.items(), key=lambda kv: kv[0] == "default"):
@@ -248,7 +348,10 @@ def _recover(label, url, flow_key, retry, bounds, state, img_path, all_text) -> 
     ss_path = _save_screenshot(f"failure_{label.replace(' ', '_')}")
     shutil.copy(img_path, ss_path)
     fix = _signal_agent(f"find_{label}", url, all_text, ss_path)
+    return _settle_fix(_apply_fix(fix, label, url, flow_key, bounds, state), url)
 
+
+def _apply_fix(fix, label, url, flow_key, bounds, state) -> str:
     if fix.get("action") == "skip":
         return f"skipped:{fix.get('reason', 'agent')}"
     elif fix.get("action") == "ocr_click":
@@ -312,23 +415,60 @@ def _is_done(status: str) -> bool:
     return status in DONE_STATUSES or status.startswith("skipped")
 
 
-def _run_one(flow_fn, url: str) -> str:
+def _run_one(flow_fn, url: str, goal=None) -> str:
+    error = None
     try:
-        return _normalize_status(flow_fn(url))
+        status = _normalize_status(flow_fn(url))
     except Skip as e:
         return f"skipped:{e.reason}"
     except RestartFlow:
         return "restart_flow"
     except VisorError as e:
         print(f"[ERROR] {e}")
+        status, error = "failed", str(e)
     except Exception as e:
         print(f"[ERROR] Target crashed unexpectedly: {type(e).__name__}: {e}")
-    if browser._page is not None:  # never launch a browser just to photograph a failure
+        status, error = "failed", f"{type(e).__name__}: {e}"
+
+    # The goal decides, not the script: check the outcome on screen
+    if goal and status in DONE_STATUSES + ("failed",):
+        if browser._page is None:
+            print("[GOAL] Can't check the goal: the flow never opened a page")
+            return "failed"
+        if goal_met(goal):
+            if status == "failed":
+                print("[GOAL] Met, although the flow reported a failure")
+            return "success"
+        status = _goal_not_met(goal, url, error)
+
+    if status == "failed" and browser._page is not None:  # never launch a browser just to photograph a failure
         try:
             print(f"[ERROR] Screenshot of the failure: {_save_screenshot('crash')}")
         except Exception:
             pass
-    return "failed"
+    return status
+
+
+def _run_target(flow_fn, url: str, goal=None) -> str:
+    """One target, with its agent fixes settled: proven fixes are saved, failed ones dropped."""
+    global _in_target
+    _in_target = True
+    try:
+        status = _run_one(flow_fn, url, goal)
+        for _ in range(2):  # the agent asked to run the target again from the start
+            if status != "retry_target":
+                break
+            print("[RUNNER] Running the target again, as the agent asked")
+            status = _run_one(flow_fn, url, goal)
+        if status == "retry_target":
+            status = "failed"
+    finally:
+        _in_target = False
+    if _is_done(status):
+        _commit_probation(url)
+    elif status != "restart_flow":
+        _reject_probation(f"the target ended as {status!r}")
+    return status
 
 
 def _pace(status: str):
@@ -344,7 +484,8 @@ def _pace(status: str):
         browser.wait(int(random.uniform(min(1.5, low), min(3.5, high)) * 1000))
 
 
-def run_flow(flow_fn, targets: list, results_csv: str, max_retries: int = 1, flow_key: str = None):
+def run_flow(flow_fn, targets: list, results_csv: str, max_retries: int = 1, flow_key: str = None,
+             goal=None):
     """
     Main loop:
       - Run flow on all targets
@@ -352,7 +493,13 @@ def run_flow(flow_fn, targets: list, results_csv: str, max_retries: int = 1, flo
       - Re-run failures up to max_retries until 100% or exhausted
     flow_fn(target) returns 'success' / 'failed' / 'skipped:<why>' / True / False / None,
     or raises visor.Skip / visor.RestartFlow / any exception (= failed).
+    goal: text (or list of texts) that must be on screen when a target is done. Defaults to
+    the flow module's GOAL, if it has one.
     """
+    if goal is None:
+        goal = getattr(sys.modules.get(getattr(flow_fn, "__module__", None) or ""), "GOAL", None)
+    if goal:
+        print(f"[GOAL] A target counts as done only when {goal!r} is on screen")
     targets = list(dict.fromkeys(t.strip() for t in targets if t and t.strip()))
     results = {t: "pending" for t in targets}
 
@@ -382,7 +529,7 @@ def run_flow(flow_fn, targets: list, results_csv: str, max_retries: int = 1, flo
 
             for n, url in enumerate(pending, 1):
                 print(f"\n[TARGET] ({n}/{len(pending)}) {url}")
-                status = _run_one(flow_fn, url)
+                status = _run_target(flow_fn, url, goal)
 
                 if status == "restart_flow":
                     print("[RUNNER] restart_flow requested! Hot-reloading active Python module...")

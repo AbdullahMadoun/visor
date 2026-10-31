@@ -111,6 +111,9 @@ def cmd_run(argv: list) -> int:
     parser.add_argument("--pace", type=_pace, help="Seconds between targets, e.g. 4-9 (default) or 0")
     parser.add_argument("--timeout", type=float, help="Seconds actions keep looking for text (default 8)")
     parser.add_argument("--results", help="Results CSV (default: <workspace>/logs/results.csv)")
+    parser.add_argument("--goal", action="append",
+                        help="Text that must be on screen when a target is done (repeatable: any of them; "
+                             "default: the flow's GOAL)")
     args = parser.parse_args(argv)
 
     if not args.targets and not args.url:
@@ -144,7 +147,8 @@ def cmd_run(argv: list) -> int:
     flow_key = os.path.splitext(os.path.basename(args.flow))[0]
     results_csv = args.results or os.path.join(WORKSPACE_DIR, "logs", "results.csv")
     try:
-        run_flow(flow_fn, targets, results_csv, max_retries=args.retries, flow_key=flow_key)
+        run_flow(flow_fn, targets, results_csv, max_retries=args.retries, flow_key=flow_key,
+                 goal=args.goal)
     except KeyboardInterrupt:
         return 130
     finally:
