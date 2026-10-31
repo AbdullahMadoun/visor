@@ -1,0 +1,9 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Slow tab</title></head>
+<body style="font: 22px Helvetica, Arial, sans-serif; margin: 40px">
+  <!-- A target=_blank link whose tab opens late, after focus has already moved: the race seen on
+       a slow CI machine, where the click's first visible effect was "moved focus" -->
+  <input id="box" style="font-size:20px">
+  <p><a href="help.html" target="_blank"
+        onclick="event.preventDefault(); document.getElementById('box').focus();
+                 setTimeout(() => window.open('help.html', '_blank'), 1500);">Open help later</a></p>
+</body></html>

@@ -85,6 +85,8 @@ _PROBE_JS = "(points) => {" + _SHARED_JS + """
       text: names(node),
       side: !!closest(node, 'aside,[role=complementary]'),
       inForm: !!(focusForm && closest(node, 'form') === focusForm),
+      newTab: (() => { const a = closest(el, 'a[target],form[target]');
+                       return !!a && !['', '_self', '_top', '_parent'].includes(a.getAttribute('target')); })(),
       layer: kind,
       layerText: layer ? (layer.innerText || '').slice(0, 600) : '',
     };
@@ -605,7 +607,9 @@ def press(target: dict, double: bool = False) -> str:
                 page.remove_listener(event, handler)
             except Exception:
                 pass
-    if settings.follow_tabs and browser.follow_popup(popups, timeout_ms=0 if effect else 300):
+    # A link that says it opens a new tab may take a while to, on a slow machine: wait for it
+    wait_ms = 3000 if (target.get("info") or {}).get("newTab") else (0 if effect else 300)
+    if settings.follow_tabs and browser.follow_popup(popups, timeout_ms=wait_ms):
         effect = "opened a new tab"
     return effect
 

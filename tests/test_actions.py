@@ -227,3 +227,12 @@ def test_ocr_only_mode_turns_off_the_page_handle(live, monkeypatch):
     visor.click("Checkout")
     monkeypatch.setattr(settings, "ocr_only", False)  # the test itself checks the page through the DOM
     assert log_text() == "checkout"
+
+
+def test_follows_a_new_tab_that_opens_late(live):
+    import visor
+    visor.goto(page_url("slow_tab.html"))
+    visor.click("Open help later")
+    assert visor.see("Help center")
+    visor.close_tab()
+    assert "slow_tab.html" in visor.current_url()

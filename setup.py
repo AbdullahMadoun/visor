@@ -21,7 +21,7 @@ setup(
     extras_require={
         "easyocr": ["easyocr>=1.7.1"],
         "mac": ["ocrmac>=1.0.0"],
-        "agent": ["anthropic>=2.3"],
+        "agent": ["anthropic>=2.3; python_version >= '3.10'"],
         "dev": ["pytest>=7.4.0"]
     },
     entry_points={
