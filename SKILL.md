@@ -20,7 +20,7 @@ description: >
 3. **The goal decides, not the script.** An agent is needed whenever the goal is not satisfied, not only when the script raises `AGENT_NEEDED`. A flow that "finished" without its success text on screen (e.g. "Pending", "Message sent") has failed: read the OCR output, find out why, and fix it. Never let a loop exit silently at a dead end when the target count isn't met.
 4. **Five real attempts before asking the human.** Captchas and two-factor prompts go to the human straight away (HUMAN_HANDSHAKE). For anything else, try at least five genuinely different approaches (different wording, `near=`, scrolling, opening menus such as "More", a different page route) before asking for the user's insight.
 5. **The pagination trap.** Infinite scroll is often not infinite: a batch can end in "Show more results" or "Load more". If OCR stops finding new targets, look for those in the OCR output and click them before concluding there are no more.
-6. **Make lessons global.** When a fix is about how the web works rather than one site (menus hiding buttons, consent banners, "Load more"), say so in the fix's `note` and save it under a branch other flows can reuse. Site-specific workflows stay in the user's own flow files.
+6. **Make lessons global.** When a fix is about how the web works rather than one site (menus hiding buttons, consent banners, "Load more"), save it under the `_global` key so every flow can use it. Site-specific workflows stay in the user's own flow files.
 
 > **THE AUTONOMOUS /GOAL DIRECTIVE: PERFORM NO MATTER WHAT.** You must operate as an autonomous agent that treats every automation task like a relentless `/goal`. Be extra thorough, and NEVER stop until you are confident the objective is completely fulfilled. Constantly audit your own work. The task is *always* achievable if you try enough. **Always assume 100% the task is doable.** If an element isn't found, scroll. If a class name changes, use visual OCR. If a modal blocks you, hit Escape. You must embrace a relentless "break-fix" cycle until success.
 >
@@ -39,6 +39,8 @@ Flows should call the `visor` API instead of chaining `browser.screenshot()` →
 ```python
 import visor
 
+GOAL = "Invitation sent"   # the target is done only when this is on screen (checked twice)
+
 def main(url):
     visor.goto(url)
     if visor.see("No longer accepting applications"):   # fatal-state pre-check
@@ -47,6 +49,8 @@ def main(url):
     visor.fill("Add a note", "Hi John")
     visor.click(["Send", "Send now"], expect="Invitation sent")   # verified, with copy variants
 ```
+
+**Always give a flow a `GOAL`.** It is how Visor tells a real success from a script that ran to the end on the wrong page. Pick text that only appears when the job is done ("Pending", "Message sent"), not text that is always there. To start from a recording: `visor record --flow NAME --url URL` writes a flow with an `expect=` per step and a `GOAL`, and replays it once. Read it before trusting it.
 
 Key calls: `click`, `fill`, `check`, `select`, `upload`, `download`, `hover`, `see`, `wait_for`, `wait_gone`, `scroll_to`, `read`, `dismiss_popups`. `visor ocr --url URL --find TEXT` shows exactly what Visor sees. The low-level modules below remain for custom logic.
 
@@ -68,13 +72,17 @@ Pages often have multiple instances of the same button label (e.g., in a sidebar
 ## The AGENT_NEEDED Protocol
 
 The script pauses and writes `agent_handshake/failure.json` when:
-- An OCR step finds nothing AND no tree branch matches the visible state.
+- An OCR step finds nothing AND no tree branch matches the visible state (`"kind": "text_not_found"`).
+- A target finished but its `GOAL` is not on screen (`"kind": "goal_not_met"`, with `goal` and `error`). The script may have reported success: the goal decides. Find out what really happened from `ocr_results` before answering. `skip` if the target truly can't be done, `restart_flow` after fixing the flow code, or `retry` to run the target again.
+
+`failure.json` also lists `rejected_fixes`: branches you suggested earlier that were tried and did not reach the goal. Don't suggest them again.
 
 **When AGENT_NEEDED fires:**
 1. **Do NOT just retry the same thing.**
 2. **Read `ocr_results` in `failure.json` — this is your complete perception of the screen.** Every visible string on the page at the moment of failure is in this array. Reason from it. You do NOT need to view the screenshot.
 3. **Generate DIVERGENT Hypotheses (Never Tunnel-Vision)**: Do not get stuck endlessly retrying one failed path. You must explicitly brainstorm multiple, equally smart, laterally divergent paths. Look for "tricks" or alternative ways around the UI. (e.g., Is there a modal? Hit Escape. Is the button hidden? Try zooming out. Is the main flow blocked? Search for an alternative entry point in a dropdown. Can we force it via DOM evaluate?).
 4. **Write fix.json** to mutate the strategy tree, or fix the code and relaunch.
+5. **Your fix is on probation.** A `save_to_tree` branch is written to `tree.json` only after the target reaches its goal. If it doesn't, the branch is thrown away and shows up in `rejected_fixes`. Add a `reason` saying why you think the fix is right; it is saved with the branch.
 
 ## Handshake Protocol Schema (fix.json)
 
@@ -87,6 +95,7 @@ Tells the engine to click a fallback target right now. By including `save_to_tre
   "action": "ocr_click",
   "target": "More",
   "then": "retry",
+  "reason": "Submit moved into the More menu",
   "save_to_tree": {
     "my_custom_flow.find_Submit.not_found.More_visible": {
       "action": "click_ocr",
@@ -142,9 +151,11 @@ Tells the engine that the objective of the current step was met via manual agent
 ```
 
 **Tree update rules:**
-- Every diagnosed failure → new branch.
+- Every diagnosed failure → new branch, saved once it is proven (it gets `proven_on` and `learned_at`).
 - Keys format: `<flow>.<step>.<not_found|other>.<VisibleElement_visible>`.
-- Never delete branches — they encode hard-won knowledge.
+- Lessons about the web in general go under `_global` instead of a flow name, e.g. `_global.find_Apply.not_found.Sold_out_visible` → `skip`. Every flow uses them when it has no branch of its own.
+- Never delete proven branches — they encode hard-won knowledge.
+- `visor tree --serve` shows the tree live in a browser.
 
 ## Execution Quality Bar
 

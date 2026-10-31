@@ -124,6 +124,8 @@ A flow is a Python file with a `main(target)` function:
 # renew.py: renew every library loan in a list
 import visor
 
+GOAL = "Renewed until"   # a target only counts as done when this is on screen
+
 def main(url):
     visor.goto(url)
     if visor.see("Not renewable"):
@@ -141,16 +143,40 @@ visor run --flow renew.py --targets loans.csv --retries 3 --headless --pace 2-5
 
 Results go to `visor_workspace/logs/results.csv` after every target, so you can stop with Ctrl+C at any time and run the same command again to resume. Finished and skipped targets are not repeated. Failed targets are retried up to `--retries` times.
 
+### Proving it worked
+
+A script that ran without errors hasn't necessarily done its job. It may have clicked the wrong "Next", or the success message may have shown for a moment and gone. So a flow can name its `GOAL`: text that must be on screen when a target is done (also `visor run --goal "Renewed until"` or `run_flow(..., goal=...)`).
+
+- After each target Visor looks for the goal, waits a moment and looks again. Text that flashes and disappears doesn't count.
+- If the goal is missing, the target isn't marked a success, even when the script says it was. The agent is called with `kind: "goal_not_met"` and the screen text, the same way it is for a missing button.
+- If the goal is on screen but the script raised an error (say the confirm dialog never showed because the request went straight through), the target counts as a success.
+
 ### Self-healing
 
 While a flow runs, a `visor.click` that cannot find its target doesn't just fail:
 
 1. **Strategy tree.** Visor checks `tree.json` for a known fix for this flow and step, such as "if *More* is visible, click it, then look again". Known fixes run instantly, with no AI involved.
-2. **Agent handshake.** If the tree has no answer, Visor writes `agent_handshake/failure.json` (the step, URL and all visible text) and waits for an agent (Claude, Gemini, or you) to write `fix.json`. A fix can include `save_to_tree`, which turns it into a permanent tree branch.
+2. **Agent handshake.** If the tree has no answer, Visor writes `agent_handshake/failure.json` (the step, URL and all visible text) and waits for an agent (Claude, Gemini, or you) to write `fix.json`. A fix can include `save_to_tree`, which turns it into a tree branch, and a `reason`, which is saved with it.
+   - **Fixes are on probation.** A new branch is written to `tree.json` only after the target it was made for reaches its goal, and it is saved with the URL that proved it. If the target still fails, the branch is dropped and the next `failure.json` lists it under `rejected_fixes`, so the agent doesn't suggest the same thing again.
+   - **Lessons for every flow.** Branches under the `_global` key apply to all flows (for example, "if *Sold out* is visible, skip"). A flow's own branch wins when both match.
 
 3. **Human handshake.** Captchas and 2FA prompts go to you, not the agent (see above). Call `visor.human_handshake("log in please", until="Dashboard")` yourself for anything else only a person should do. It resumes when the text appears, or when you create `agent_handshake/human_done`.
 
-Run with `--no-agent` to fail such steps immediately instead of waiting. `visor tree` shows what has been learned. The `fix.json` actions (`ocr_click`, `retry`, `skip`, `agent_fixed`, `restart_flow`) are documented in [SKILL.md](SKILL.md).
+Run with `--no-agent` to fail such steps immediately instead of waiting. `visor tree` prints what has been learned; `visor tree --serve` opens a live map of it in the browser that refreshes as the agent adds branches. The `fix.json` actions (`ocr_click`, `retry`, `skip`, `agent_fixed`, `restart_flow`) are documented in [SKILL.md](SKILL.md).
+
+---
+
+### Recording a flow
+
+You can also do a task once by hand and let Visor write the flow:
+
+```bash
+visor record --flow join --url https://example.com/events/1
+```
+
+Visor opens a tab and watches your clicks, typing, Enter presses and dropdown choices. After each one it notes what text appeared and what disappeared. When you click **Stop**, it writes `join.py`: each click gets an `expect=` taken from what appeared after it, and the last thing that appeared becomes the `GOAL`. Then it replays the new flow once, with no agent, and writes at the top of the file whether the replay reached the goal.
+
+Passwords and one-time codes are never recorded. The flow reads them from environment variables instead (`VISOR_PASSWORD` for a field labelled "Password"). Read the file before running it on many targets. The recorder can't tell which typed values should change from target to target.
 
 ---
 

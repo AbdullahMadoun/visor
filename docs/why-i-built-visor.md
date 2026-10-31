@@ -40,6 +40,7 @@ Visor flips this around:
 
 * It runs fast, predictable code by default.
 * It clicks what it sees, then checks that the action actually worked (like a button changing to "Pending").
+* Each flow says what "done" looks like on screen. If that text isn't there at the end, it isn't a success, whatever the script thinks.
 * The AI is not driving every second; it is only called in when something unexpected breaks.
 
 ### 2. A memory that actually learns
@@ -50,7 +51,7 @@ When Visor runs into a state it doesn't know, it signals an **AGENT_HANDSHAKE**:
 
 1. It pauses cleanly and writes `failure.json`: the step it was on and every piece of text on screen. No screenshot.
 2. The agent reads that and writes `fix.json` (for example: "if the button is missing and 'More' is visible, open 'More' first").
-3. Visor saves that lesson into its strategy tree, `tree.json`.
+3. Visor tries the fix. Only if the job then actually gets done does it save the lesson into its strategy tree, `tree.json`. A fix that didn't work is thrown out, and the agent is told so next time.
 
 Once Visor learns a fix, it repeats it on future runs without needing the agent again. The tree is plain JSON, so you can read it, edit it, and commit it.
 
