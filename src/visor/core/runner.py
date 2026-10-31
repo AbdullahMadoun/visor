@@ -101,6 +101,8 @@ def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str,
         "message": f"AGENT_NEEDED: step='{step}' failed. OCR found: {ocr_found}"
     }
     payload.update({k: v for k, v in context.items() if v})
+    if settings.flow:
+        payload["flow"] = settings.flow  # the strategy-tree key a saved rule goes under
     if _current_target:
         payload["target"] = _current_target
     try:  # where the browser really is; a flow can wander off its target without noticing

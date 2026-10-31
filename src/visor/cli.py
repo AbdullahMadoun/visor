@@ -8,6 +8,7 @@ Usage:
   visor login https://example.com                    log in by hand once; later runs reuse the session
   visor ocr [image.png | --url URL] [--find TEXT]    print what visor sees
   visor tree [--serve [--port N]] [--review]         show the learned strategy tree (--serve: live map; --review: approve fixes)
+  visor agent [--model M | --command CMD]            answer AGENT_NEEDED pauses with a model (see visor/agent.py)
   visor doctor                                       check the installation
 """
 
@@ -25,7 +26,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 from visor.config import configure, settings
 from visor.core import WORKSPACE_DIR
 
-COMMANDS = ("run", "record", "login", "ocr", "tree", "doctor")
+COMMANDS = ("run", "record", "login", "ocr", "tree", "agent", "doctor")
 
 
 def load_targets(path: str) -> list:
@@ -109,6 +110,9 @@ def cmd_run(argv: list) -> int:
     parser.add_argument("--no-agent", action="store_true", help="Fail unknown steps instead of waiting for fix.json")
     parser.add_argument("--review", action="store_true",
                         help="Proven agent fixes wait for `visor tree --review` instead of going into tree.json")
+    parser.add_argument("--agent", metavar="MODEL_OR_COMMAND",
+                        help="Answer AGENT_NEEDED pauses automatically: 'claude' (Anthropic API), a Claude model id, "
+                             "or a command that reads the report on stdin and prints JSON")
     parser.add_argument("--agent-timeout", type=float, help="Seconds to wait for an agent fix (default 600)")
     parser.add_argument("--pace", type=_pace, help="Seconds between targets, e.g. 4-9 (default) or 0")
     parser.add_argument("--timeout", type=float, help="Seconds actions keep looking for text (default 8)")
@@ -150,6 +154,13 @@ def cmd_run(argv: list) -> int:
     from visor.core import browser
     flow_key = os.path.splitext(os.path.basename(args.flow))[0]
     results_csv = args.results or os.path.join(WORKSPACE_DIR, "logs", "results.csv")
+    helper = None
+    if args.agent:
+        if args.no_agent:
+            parser.error("--agent and --no-agent contradict each other")
+        import subprocess
+        # The same file handshake, answered by `visor agent` running next to this run
+        helper = subprocess.Popen([sys.executable, "-m", "visor.cli", "agent", *_agent_args(args.agent)])
     try:
         run_flow(flow_fn, targets, results_csv, max_retries=args.retries, flow_key=flow_key,
                  goal=args.goal)
@@ -158,6 +169,8 @@ def cmd_run(argv: list) -> int:
     finally:
         # Clean up browser session
         browser.close()
+        if helper:
+            helper.terminate()
 
     print(f"\n[DAEMON] Task complete. Results: {results_csv}")
     return 0
@@ -254,6 +267,41 @@ def cmd_ocr(argv: list) -> int:
     return 0
 
 
+def _agent_ask(model: str = None, command: str = None):
+    from visor import agent
+    if command:
+        return agent.ask_command(command)
+    return agent.ask_claude(model or agent.DEFAULT_MODEL)
+
+
+def _agent_args(spec: str) -> list:
+    """`--agent claude`, `--agent claude-sonnet-5-5` or `--agent "my-model --json"` → `visor agent` arguments."""
+    if spec in ("claude", "anthropic"):
+        return []
+    if spec.startswith("claude-") and " " not in spec:
+        return ["--model", spec]
+    return ["--command", spec]
+
+
+def cmd_agent(argv: list) -> int:
+    parser = argparse.ArgumentParser(prog="visor agent",
+                                     description="Answer AGENT_NEEDED pauses with a model, checking each answer.")
+    parser.add_argument("--model", help="Claude model (default: claude-opus-5-5); needs pip install 'visor[agent]'")
+    parser.add_argument("--command", help="any program instead: gets the prompt on stdin, prints a JSON answer")
+    parser.add_argument("--once", action="store_true", help="answer one failure, then exit")
+    parser.add_argument("--dry-run", action="store_true", help="print the fix instead of writing fix.json")
+    args = parser.parse_args(argv)
+    from visor import agent
+    from visor.core import runner
+    try:
+        ask = _agent_ask(args.model, args.command)
+    except RuntimeError as e:
+        print(f"[AGENT] {e}")
+        return 1
+    agent.watch(runner.HANDSHAKE_DIR, ask, once=args.once, dry_run=args.dry_run)
+    return 0
+
+
 def cmd_tree(argv: list) -> int:
     parser = argparse.ArgumentParser(prog="visor tree", description="Show the learned strategy tree.")
     parser.add_argument("--serve", action="store_true", help="serve a live, auto-refreshing map in the browser")
@@ -339,7 +387,7 @@ def main(argv: list = None):
         command, rest = "run", argv
 
     handler = {"run": cmd_run, "record": cmd_record, "login": cmd_login,
-               "ocr": cmd_ocr, "tree": cmd_tree, "doctor": cmd_doctor}[command]
+               "ocr": cmd_ocr, "tree": cmd_tree, "agent": cmd_agent, "doctor": cmd_doctor}[command]
     sys.exit(handler(rest))
 
 if __name__ == "__main__":

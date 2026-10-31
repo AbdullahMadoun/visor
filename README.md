@@ -165,6 +165,17 @@ While a flow runs, a `visor.click` that cannot find its target doesn't just fail
 
 3. **Human handshake.** Captchas and 2FA prompts go to you, not the agent (see above). Call `visor.human_handshake("log in please", until="Dashboard")` yourself for anything else only a person should do. It resumes when the text appears, or when you create `agent_handshake/human_done`.
 
+**No coding agent watching?** `visor agent` answers the handshake for you: it reads each `failure.json`, asks a model, checks the answer and writes `fix.json`. Or start it with the run: `visor run --flow renew.py --targets loans.csv --agent claude`.
+
+```bash
+pip install -e ".[agent]"                      # the Anthropic SDK; set ANTHROPIC_API_KEY
+visor agent                                    # Claude (claude-opus-5-5 by default; --model to change)
+visor agent --command "my-local-model --json"  # or any program: the report on stdin, a JSON answer on stdout
+visor agent --once --dry-run                   # print the answer for one failure, write nothing
+```
+
+The page text is untrusted, so the answer is checked before Visor uses it. The model may only click text that is on screen (or a listed control) or skip. It can't repeat a rejected fix, and it never writes a tree rule: Visor shapes the rule from the answer, and the rule is still saved only once the target succeeds.
+
 Run with `--no-agent` to fail such steps immediately instead of waiting. `visor tree` prints what has been learned; `visor tree --serve` serves a live map of it at http://localhost:8080 that refreshes as the agent adds branches, with fixes waiting for review and recently rejected ones listed below it. The `fix.json` actions (`ocr_click`, `retry`, `skip`, `agent_fixed`, `restart_flow`) are documented in [SKILL.md](SKILL.md).
 
 ---
@@ -284,7 +295,7 @@ Contributions are welcome, small ones included. Good places to start:
 
 - **Linux and Windows.** Run `pytest` with EasyOCR and report what breaks; an option for a faster local OCR engine would be even better.
 - **More test pages.** A small HTML page in `tests/pages/` that reproduces a real-world trap (sticky headers, virtual lists, shadow DOM, right-to-left layouts) and a test that clicks it.
-- **Agent adapters.** A small script that answers `failure.json` using a model API or a local model, so the handshake works without a coding agent watching.
+- **Agent adapters.** `visor agent` talks to Claude, or to any program through `--command`. A ready-made script for a local model (llama.cpp, Ollama) or another provider's CLI would make a good `examples/` addition.
 - **Docs.** If something in this README confused you, that's a bug. Open an issue.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup; the full test suite runs offline in about two minutes.
@@ -293,7 +304,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup; the full test suite runs offli
 
 ## Directory structure
 
-- `src/visor/`: the library. `core/actions.py` (finding and clicking), `core/ocr.py` (perception), `core/browser.py` (tabs, sessions), `core/runner.py` (flows and self-healing), `strategy/` (the tree).
+- `src/visor/`: the library. `core/actions.py` (finding and clicking), `core/ocr.py` (perception), `core/browser.py` (tabs, sessions), `core/runner.py` (flows and self-healing), `strategy/` (the tree), `agent.py` (`visor agent`).
 - `visor_workspace/` *(ignored by git)*: your runtime data: `session.json`, `tree.json`, `agent_handshake/`, `logs/`, `downloads/`, `videos/`.
 - `tests/`: `pytest` runs the suite. Browser tests use local pages in `tests/pages/` and need no internet.
 

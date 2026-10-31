@@ -31,6 +31,7 @@ Issues = "https://github.com/AbdullahMadoun/visor/issues"
 [project.optional-dependencies]
 easyocr = ["easyocr>=1.7.1"]
 mac = ["ocrmac>=1.0.0"]
+agent = ["anthropic>=2.3"]
 dev = [
     "pytest>=7.4.0",
 ]
