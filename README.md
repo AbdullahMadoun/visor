@@ -33,6 +33,8 @@ visor doctor                          # checks the browser, OCR and workspace
 python examples/self_healing_demo.py  # the demo above, on a local page, no API key
 ```
 
+Visor isn't on PyPI yet: `pip install visor` installs an unrelated package with the same name.
+
 On macOS Visor uses Apple's on-device OCR (`ocrmac`): fast, word-accurate, and it reads Arabic and other scripts out of the box. On Linux and Windows it uses EasyOCR (slower, and the least tested path: [help wanted](#help-wanted)).
 
 ---
