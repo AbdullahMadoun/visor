@@ -65,6 +65,10 @@ _PROBE_JS = "(points) => {" + _SHARED_JS + """
   };
   const names = (n) => [n.innerText, n.value, n.getAttribute('aria-label'), n.getAttribute('title'),
                         n.getAttribute('placeholder'), n.getAttribute('alt')].filter(Boolean).join(' ').slice(0, 400);
+  // The form holding the field being typed in: its own button beats a same-named one elsewhere
+  let focused = document.activeElement;
+  while (focused && focused.shadowRoot && focused.shadowRoot.activeElement) focused = focused.shadowRoot.activeElement;
+  const focusForm = focused && focused !== document.body && focused.matches && focused.matches(FIELD) ? closest(focused, 'form') : null;
   return points.map(([x, y]) => {
     const el = topAt(x, y);
     if (!el) return null;
@@ -80,6 +84,7 @@ _PROBE_JS = "(points) => {" + _SHARED_JS + """
                                (control.closest && control.closest('fieldset[disabled]')))),
       text: names(node),
       side: !!closest(node, 'aside,[role=complementary]'),
+      inForm: !!(focusForm && closest(node, 'form') === focusForm),
       layer: kind,
       layerText: layer ? (layer.innerText || '').slice(0, 600) : '',
     };
@@ -287,9 +292,9 @@ def _control_score(m: dict) -> int:
 def _rank(m: dict) -> tuple:
     # Word-for-word matches first; among those prefer real controls, enabled, uncovered; then OCR's own ranking.
     info = m.get("info") or {}
-    # A control in a sidebar (<aside>) loses ties to the same control in the main content.
+    # Ties: the form you are typing in beats the rest of the page, and a sidebar (<aside>) loses.
     return (m["tier"] >= 3, _control_score(m), not info.get("disabled"), not m.get("covered"),
-            not info.get("side"), m["tier"], m["ratio"], m["confidence"], -m["order"], -m["start"])
+            bool(info.get("inForm")), not info.get("side"), m["tier"], m["ratio"], m["confidence"], -m["order"], -m["start"])
 
 
 def _choose(matches: list, near=None, index: int = None) -> Optional[dict]:

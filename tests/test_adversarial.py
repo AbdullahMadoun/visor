@@ -224,3 +224,30 @@ def test_goal_on_screen_beats_the_missing_confirm(live, tmp_path, monkeypatch):
     results = runner.run_flow(_send_flow, [target], str(tmp_path / "r.csv"), goal="Pending")
     assert log_text() == "send"  # Confirm never existed; the script did raise
     assert results[target] == "success"
+
+
+# ── 6. "Sign in" in the header and in the form you are filling ───────────────
+
+def test_sign_in_after_filling_the_form_submits_the_form(live):
+    import visor
+    visor.goto(page_url("adv_signin.html"))
+    visor.fill("Email", "me@example.com")
+    visor.fill("Password", "secret")
+    visor.click("Sign in")
+    assert log_text() == "form:signed in"
+
+
+def test_sign_in_with_no_form_in_use_follows_reading_order(live):
+    import visor
+    visor.goto(page_url("adv_signin.html"))
+    visor.click("Sign in")
+    assert log_text() == "header:Sign in"
+
+
+# ── 7. A modal dialog over a button with the same text ───────────────────────
+
+def test_a_modal_dialogs_button_beats_the_one_behind_it(live):
+    import visor
+    visor.goto(page_url("adv_signin.html") + "?dialog=1")
+    visor.click("Continue")
+    assert log_text() == "dialog:Continue"

@@ -248,7 +248,7 @@ The lower-level modules (`visor.core.ocr`, `browser`, `clicker`, `runner`) are s
 
 - **It needs text to aim at.** Icon-only buttons are found through their accessible name (`aria-label`, `title`, `alt`); an unlabeled icon, a canvas app or a game is out of reach.
 - **The screen is the source of truth, not the only source.** OCR finds the text; the browser is then asked what sits under that pixel, so a real button beats the same word in a paragraph. "No DOM" here means no selectors in your code, not that the DOM is never read.
-- **Same words in two places.** When two controls show the same text, a real control beats plain text and the main content beats a sidebar (`<aside>`); after that it is reading order. `near="Blue mug"` picks the one that shares a container with "Blue mug" (the same card, row or form), then the closest. If the page gives no such clues, say which one with `index=` or `region=`.
+- **Same words in two places.** When two controls show the same text, a real control beats plain text, a button in an open dialog beats the page behind it, the form you are typing in beats the rest of the page, and the main content beats a sidebar (`<aside>`); after that it is reading order. `near="Blue mug"` picks the one that shares a container with "Blue mug" (the same card, row or form), then the closest. If the page gives no such clues, say which one with `index=` or `region=`.
 - **Chromium only**, through Playwright.
 - **Linux and Windows use EasyOCR**, which is slower and less accurate than Apple's on-device OCR. Most of the testing so far is on macOS.
 - **It does not get around bot protection.** Captchas and two-factor prompts are handed to you. Use it on sites and accounts you're allowed to automate.

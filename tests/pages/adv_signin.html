@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Adversarial: two Sign in</title>
+<style>
+  body { font: 20px -apple-system, Helvetica, Arial, sans-serif; margin: 0; }
+  header { display: flex; justify-content: space-between; padding: 18px 40px; background: #f3f3f3; }
+  header a { color: #0645ad; font-size: 20px; }
+  main { padding: 30px 40px; }
+  label { display: block; margin-top: 16px; }
+  input { font-size: 20px; padding: 6px; width: 320px; }
+  button { font-size: 20px; padding: 10px 24px; margin-top: 22px; }
+  #log { margin-top: 24px; font-weight: bold; }
+  dialog { font-size: 20px; padding: 26px; }
+</style></head>
+<body>
+  <!-- The trap: the header's "Sign in" link comes first in reading order -->
+  <header><strong>Bookshop</strong><a href="#" onclick="say('header:Sign in'); return false;">Sign in</a></header>
+  <main>
+    <h2>Welcome back</h2>
+    <form onsubmit="say('form:signed in'); return false;">
+      <label>Email<br><input id="email"></label>
+      <label>Password<br><input id="password" type="password"></label>
+      <button type="submit">Sign in</button>
+    </form>
+    <p><button onclick="say('page:Continue')">Continue</button></p>
+    <p id="log">Ready</p>
+  </main>
+  <dialog id="dlg"><p>Your cart was saved.</p><button onclick="say('dialog:Continue'); this.closest('dialog').close()">Continue</button></dialog>
+  <script>
+    function say(t) { document.getElementById('log').textContent = t; }
+    if (new URLSearchParams(location.search).get('dialog') === '1') document.getElementById('dlg').showModal();
+  </script>
+</body></html>
