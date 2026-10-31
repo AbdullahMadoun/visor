@@ -1,0 +1,53 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Everything that needs no browser, on the oldest and newest supported Python
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install (CPU-only PyTorch for EasyOCR, so the download stays small)
+        run: |
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev,agent]"
+      - run: pytest -m "not browser and not network" -q
+
+  # The full suite with a real browser and real OCR: EasyOCR on Linux, Apple's OCR on macOS
+  browser:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install CPU-only PyTorch (Linux)
+        if: runner.os == 'Linux'
+        run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+      - name: Install
+        run: |
+          pip install -e ".[dev,agent]"
+          playwright install --with-deps chromium
+      - name: Cache EasyOCR models
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.EasyOCR
+          key: easyocr-models-v1
+      - run: visor doctor
+      - run: pytest -m "not network" -q -rfE
