@@ -1,197 +1,103 @@
-"""
-Recorder Stress Test
-Tests the full recording pipeline without needing a real website:
-- Network intercept routing
-- Event queue processing
-- OCR nearest-label resolution
-- Before/after screenshot capture
-- Annotation queuing and auto-attach
-- Undo
-- Rapid-fire click bursts
-- Stop signal
-"""
-import os
-import sys
+"""The recorder keeps what changed after each action and turns it into a flow that checks itself."""
 import json
-import time
-import threading
 
-# Point at the src tree
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+import pytest
 
-from visor.core import recorder as rec
-from visor.core import browser
-
-RESULTS = []
-
-# ── helpers ────────────────────────────────────────────────────────────────
-
-def _fire_event(page, event: dict):
-    """Simulate a browser event via JS fetch → network intercept."""
-    page.evaluate("""
-        (data) => fetch('/visor-api-event', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
-        })
-    """, event)
-    time.sleep(0.15)   # let the intercept and queue drain tick
+from conftest import page_url
+from visor.core import recorder
 
 
-def _drain(page, ticks: int = 3):
-    """Let the main loop drain the queue and scheduled tasks a few times."""
-    for _ in range(ticks):
-        while not rec._action_queue.empty():
-            rec._process_event(rec._action_queue.get_nowait())
-            
-        now = time.time()
-        for task in list(rec._scheduled_tasks):
-            execute_at, func = task
-            if now >= execute_at:
-                func()
-                rec._scheduled_tasks.remove(task)
-                
-        page.wait_for_timeout(60)
+def event(kind, t, **kw):
+    return {"type": kind, "t": t, **kw}
 
 
-# ── test runner ────────────────────────────────────────────────────────────
-
-def run_tests():
-    print("\n" + "="*60)
-    print("VISOR RECORDER STRESS TEST")
-    print("="*60)
-
-    # Reset module state
-    rec._events.clear()
-    rec._flow_name = "stress_test"
-    rec._recording_active = True
-    rec._pending_annotation = None
-    while not rec._action_queue.empty():
-        rec._action_queue.get_nowait()
-
-    os.makedirs(rec.TRACE_DIR, exist_ok=True)
-
-    # Init browser and inject recorder
-    page = browser.init_browser(headless=True)
-    rec._page_ref = page
-    rec._inject_recorder(page)
-
-    # Navigate to a real domain so fetch('/visor-api-event') has a valid base URL
-    page.goto("https://example.com")
-    page.evaluate("""
-        document.body.innerHTML = `
-            <div style="background:#111;color:white;font-family:sans-serif;padding:40px;height:100vh;">
-                <h1>Recorder Test Page</h1>
-                <button id="btn-a" style="padding:12px 24px;margin:8px;font-size:18px;">Connect</button>
-                <button id="btn-b" style="padding:12px 24px;margin:8px;font-size:18px;">More</button>
-                <button id="btn-c" style="padding:12px 24px;margin:8px;font-size:18px;">Follow</button>
-                <p id="status">Waiting...</p>
-            </div>
-        `;
-    """)
-    time.sleep(0.5)
-
-    passed = 0
-    failed = 0
-
-    def check(name, condition):
-        nonlocal passed, failed
-        if condition:
-            print(f"  ✅ PASS  {name}")
-            passed += 1
-        else:
-            print(f"  ❌ FAIL  {name}")
-            failed += 1
-
-    # ── Test 1: Single click registers ────────────────────────────────────
-    print("\n[1] Single click registration")
-    _fire_event(page, {"type": "click", "x": 100, "y": 200, "timestamp": 1000001})
-    _drain(page)
-    check("Event appended to _events", len(rec._events) == 1)
-    check("Event type is 'click'",     rec._events[0]["type"] == "click")
-    check("x/y preserved",            rec._events[0]["x"] == 100 and rec._events[0]["y"] == 200)
-
-    # ── Test 2: Annotation queues then auto-attaches ───────────────────────
-    print("\n[2] Annotation queuing + auto-attach")
-    _fire_event(page, {"type": "annotation", "text": "Clicking Connect button", "timestamp": 1000002})
-    _drain(page)
-    check("Annotation stored in _pending_annotation", rec._pending_annotation == "Clicking Connect button")
-
-    _fire_event(page, {"type": "click", "x": 150, "y": 200, "timestamp": 1000003})
-    _drain(page)
-    check("Annotation attached to click event", rec._events[1].get("annotation") == "Clicking Connect button")
-    check("_pending_annotation cleared after attach", rec._pending_annotation is None)
-
-    # ── Test 3: Undo removes last event ───────────────────────────────────
-    print("\n[3] Undo")
-    count_before = len(rec._events)
-    _fire_event(page, {"type": "undo"})
-    _drain(page)
-    check("Undo removes last event", len(rec._events) == count_before - 1)
-
-    # ── Test 4: Rapid-fire clicks (burst of 20) ───────────────────────────
-    print("\n[4] Rapid-fire burst (20 clicks)")
-    count_before = len(rec._events)
-    for i in range(20):
-        _fire_event(page, {"type": "click", "x": 50 + i, "y": 100, "timestamp": 2000000 + i})
-    _drain(page, ticks=10)
-    burst_count = len(rec._events) - count_before
-    check(f"All 20 burst clicks registered (got {burst_count})", burst_count == 20)
-
-    # ── Test 5: Multiple annotations don't stack ──────────────────────────
-    print("\n[5] Double annotation (last one wins)")
-    _fire_event(page, {"type": "annotation", "text": "First annotation", "timestamp": 3000001})
-    _drain(page)
-    _fire_event(page, {"type": "annotation", "text": "Second annotation", "timestamp": 3000002})
-    _drain(page)
-    check("Second annotation overwrites first", rec._pending_annotation == "Second annotation")
-
-    # Consume pending with a click
-    _fire_event(page, {"type": "click", "x": 200, "y": 200, "timestamp": 3000003})
-    _drain(page)
-
-    # ── Test 6: Stop signal halts recording ───────────────────────────────
-    print("\n[6] Stop signal")
-    rec._recording_active = True  # ensure it's active
-    _fire_event(page, {"type": "stop"})
-    _drain(page)
-    check("_recording_active set to False by stop", not rec._recording_active)
-
-    # ── Test 7: Trace file saves cleanly ──────────────────────────────────
-    print("\n[7] Trace file serialization")
-    trace_path = os.path.join(rec.TRACE_DIR, "stress_test_trace.json")
-    with open(trace_path, "w") as f:
-        json.dump({
-            "flow": "stress_test",
-            "url": "about:blank",
-            "description": "Stress test",
-            "events": rec._events
-        }, f, indent=2)
-    check("Trace file written", os.path.exists(trace_path))
-    with open(trace_path) as f:
-        loaded = json.load(f)
-    check("Trace JSON valid and events present", len(loaded["events"]) > 0)
-    check("Every click event has required keys", all(
-        {"type","x","y","timestamp","clicked_label","annotation","dynamic_label","screenshots"} <= e.keys()
-        for e in loaded["events"] if e["type"] == "click"
-    ))
-
-    # ── Test 8: OCR helpers don't crash on bad paths ───────────────────────
-    print("\n[8] OCR helpers robustness")
-    result = rec._nearest_label(0, 0, "/nonexistent/path.png")
-    check("_nearest_label returns '' on bad path", result == "")
-    result = rec._ocr_texts("/nonexistent/path.png")
-    check("_ocr_texts returns [] on bad path", result == [])
-
-    # ── Summary ────────────────────────────────────────────────────────────
-    print("\n" + "="*60)
-    print(f"RESULTS: {passed} passed, {failed} failed out of {passed+failed} tests")
-    print("="*60 + "\n")
-
-    browser.close()
-    return failed == 0
+TRACE = {
+    "flow": "club", "url": "http://club.test/", "description": "join the book club",
+    "recorded_at": "2026-10-31T10:00:00",
+    "events": [
+        event("navigate", 0, url="http://club.test/"),
+        event("fill", 1, label="Email", value="me@example.com", secret=False, appeared=["me@example.com"]),
+        event("fill", 2, label="Password", value=None, secret=True, note="use the club account"),
+        event("scroll", 3, y=400),
+        event("select", 4, label="Plan", option="Yearly"),
+        event("click", 5, label="Join club", appeared=["3", "Plan Yearly", "Welcome aboard", "A very long paragraph " * 5],
+              disappeared=[]),
+        event("navigate", 6, url="http://club.test/welcome"),  # caused by the click
+        event("navigate", 20, url="http://club.test/settings"),  # typed by the person
+        event("click", 21, label="Delete draft", appeared=[], disappeared=["Delete draft"]),
+        event("fill", 22, label="Search", value="dune", secret=False),
+        event("enter", 23, appeared=["Results for dune"]),
+    ],
+}
 
 
-if __name__ == "__main__":
-    success = run_tests()
-    sys.exit(0 if success else 1)
+def test_flow_checks_each_step_and_ends_with_a_goal():
+    source = recorder.synthesize(TRACE)
+    compile(source, "club.py", "exec")
+    assert "GOAL = 'Results for dune'" in source
+    assert "visor.click('Join club', expect='Welcome aboard')" in source  # not "3", not the echoed choice, not the paragraph
+    assert "visor.fill('Email', 'me@example.com')" in source
+    assert "visor.select('Plan', 'Yearly')" in source
+    assert "visor.goto('http://club.test/settings')" in source
+    assert "club.test/welcome" not in source  # that page load came from the click
+    assert "visor.wait_gone('Delete draft')" in source  # nothing appeared, but the button went away
+    assert "visor.fill('Search', 'dune', enter=True)" in source
+    assert "visor.wait_for('Results for dune')" in source
+    assert "# use the club account" in source
+
+
+def test_passwords_come_from_the_environment():
+    source = recorder.synthesize(TRACE)
+    assert "visor.fill('Password', os.environ['VISOR_PASSWORD'])" in source
+    assert "import os" in source and "VISOR_PASSWORD" in source.split('"""')[1]
+
+
+def test_no_proof_means_no_goal_and_no_replay(tmp_path):
+    trace = dict(TRACE, events=[event("click", 1, label="Open", appeared=["12:04"], disappeared=[])])
+    assert "GOAL = None" in recorder.synthesize(trace)
+    status = recorder.write_flow(trace, str(tmp_path / "f.py"))
+    assert status.startswith("not run")
+    assert status in (tmp_path / "f.py").read_text()
+
+
+def test_pick_expect_skips_numbers_long_text_and_the_label_itself():
+    assert recorder._pick_expect(["Join", "$9.99", "x" * 50, "Pending"], "Join") == "Pending"
+    assert recorder._pick_expect(["12", "4:05"]) is None
+
+
+@pytest.mark.browser
+def test_record_a_form_and_replay_it(live, tmp_path, monkeypatch):
+    monkeypatch.setattr(recorder, "TRACE_DIR", str(tmp_path))
+    monkeypatch.setattr(recorder, "SETTLE", 0.6)
+    monkeypatch.setenv("VISOR_PASSWORD", "hunter2")
+    url = page_url("signup.html")
+
+    page = live.new_tab()
+    rec = recorder.Recorder(page, "club", url, "join the book club")
+    rec.attach()
+    page.goto(url)
+    rec.screen = rec.read_screen()
+
+    def settle():
+        for _ in range(20):
+            rec.tick()
+            page.wait_for_timeout(60)
+
+    page.click("#email"); page.keyboard.type("me@example.com"); page.keyboard.press("Tab"); settle()
+    page.click("#pw"); page.keyboard.type("hunter2"); page.keyboard.press("Tab"); settle()
+    page.select_option("#plan", "Yearly"); settle()
+    page.click("text=Join club"); settle()
+    rec.finish()
+    live.close_tab()
+
+    trace = rec.trace()
+    assert "hunter2" not in json.dumps(trace)  # the password never reaches the trace
+    kinds = [(e["type"], e.get("label")) for e in trace["events"] if e["type"] != "navigate"]
+    assert kinds == [("fill", "Email"), ("fill", "Password"), ("select", "Plan"), ("click", "Join club")]
+    assert "Welcome aboard" in trace["events"][-1]["appeared"]
+    assert not any("Recording" in t for e in trace["events"] for t in e.get("appeared", []))
+
+    out = tmp_path / "club.py"
+    status = recorder.write_flow(trace, str(out))
+    assert status.startswith("reached the goal"), out.read_text()
+    assert "GOAL = 'Welcome aboard'" in out.read_text()

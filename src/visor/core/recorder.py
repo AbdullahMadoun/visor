@@ -1,361 +1,412 @@
-import os
-import sys
+"""
+Record a flow by doing it once by hand, then turn it into a flow file that checks itself.
+
+For every action (click, typing, Enter, a choice in a dropdown) the recorder keeps
+what text was on screen before and after it. What appeared becomes the step's
+`expect=`; what the last step made appear becomes the flow's GOAL. The new flow is
+then replayed once, and the file says whether that replay reached the goal.
+
+Password and one-time-code fields are never recorded: the flow reads them from
+environment variables instead.
+"""
+import datetime
 import json
+import os
 import queue
+import re
 import time
-import types
+
 from visor.core import browser, ocr, WORKSPACE_DIR
 
 TRACE_DIR = os.path.join(WORKSPACE_DIR, "logs", "traces")
+SETTLE = 1.0  # seconds to wait after an action before reading the result
+NAV_AFTER_ACTION = 3.0  # a page load this soon after an action was caused by it
 
-class RecorderContext:
-    def __init__(self, flow_name: str, url: str = "", description: str = ""):
+_JS = r"""
+(() => {
+  if (window.__visorRecorder) return;
+  window.__visorRecorder = true;
+  const send = (data) => { try { window.visorSendEvent(data); } catch (e) {} };
+  const inOverlay = (el) => el && el.closest && el.closest('#visor-recorder-ui');
+  const visible = (s) => (s || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const secret = (el) => {
+    const auto = (el.getAttribute('autocomplete') || '').toLowerCase();
+    return el.type === 'password' || /password|one-time-code|cc-/.test(auto);
+  };
+  const fieldLabel = (el) => visible(
+    (el.labels && el.labels[0] && el.labels[0].innerText) || el.getAttribute('aria-label') ||
+    el.placeholder || el.title || el.name || '');
+  const isTextField = (el) => el && (el.tagName === 'TEXTAREA' ||
+    (el.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|file|image|range|color|hidden)$/.test(el.type)));
+  const sent = new WeakMap();  // last value sent per field, so change + Enter don't record twice
+
+  function sendFill(el) {
+    if (!isTextField(el) || sent.get(el) === el.value) return;
+    sent.set(el, el.value);
+    send({type: 'fill', label: fieldLabel(el), secret: secret(el), value: secret(el) ? null : el.value});
+  }
+
+  document.addEventListener('click', (e) => {
+    if (inOverlay(e.target)) return;
+    const el = e.target.closest('button, a, [role], input, label, select, summary') || e.target;
+    if (isTextField(el) || el.tagName === 'SELECT') return;  // focusing a field is not a step
+    const r = el.getBoundingClientRect();
+    send({type: 'click', x: e.clientX, y: e.clientY, rect: [r.left, r.top, r.right, r.bottom],
+          text: visible(el.getAttribute('aria-label') || el.innerText || el.value || el.title || el.alt)});
+  }, true);
+
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    if (inOverlay(el)) return;
+    if (el.tagName === 'SELECT') {
+      const opt = el.options[el.selectedIndex];
+      send({type: 'select', label: fieldLabel(el), option: visible(opt ? opt.text : el.value)});
+    } else {
+      sendFill(el);
+    }
+  }, true);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || inOverlay(e.target)) return;
+    sendFill(e.target);
+    send({type: 'enter'});
+  }, true);
+
+  let scrollTimer = null;
+  window.addEventListener('scroll', () => {
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => send({type: 'scroll', y: Math.round(window.scrollY)}), 400);
+  }, true);
+
+  function make(tag, text, css) {
+    const el = document.createElement(tag);
+    if (text) el.textContent = text;
+    if (css) el.style.cssText = css;
+    return el;
+  }
+  function overlay() {
+    if (!document.body || document.getElementById('visor-recorder-ui')) return;
+    const ui = make('div', '', 'position:fixed;bottom:16px;right:16px;z-index:2147483647;background:#0f172a;' +
+      'color:#fff;font:13px system-ui,sans-serif;padding:10px 12px;border-radius:10px;display:flex;' +
+      'gap:8px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.4)');
+    ui.id = 'visor-recorder-ui';
+    const note = make('input', '', 'width:170px;padding:4px 6px;border-radius:6px;border:1px solid #334155;' +
+      'background:#1e293b;color:#fff');
+    note.placeholder = 'note for the next step';
+    const undo = make('button', 'Undo', 'cursor:pointer');
+    const stop = make('button', 'Stop', 'cursor:pointer');
+    ui.append(make('span', '●', 'color:#ef4444'), make('span', 'Recording'), note, undo, stop);
+    document.body.appendChild(ui);
+    note.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && note.value.trim()) { send({type: 'note', text: note.value.trim()}); note.value = ''; }
+    });
+    undo.addEventListener('click', () => send({type: 'undo'}));
+    stop.addEventListener('click', () => send({type: 'stop'}));
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', overlay);
+  else overlay();
+  new MutationObserver(overlay).observe(document.documentElement, {childList: true, subtree: true});
+})();
+"""
+
+
+class Recorder:
+    """Watches one page and turns what the person does into steps with before/after text."""
+
+    def __init__(self, page, flow_name: str, url: str = "", description: str = ""):
+        self.page = page
         self.flow_name = flow_name
         self.url = url
         self.description = description
         self.events = []
-        self.active = False
-        self.pending_annotation = None
-        self.page_ref = None
-        self.action_queue = queue.Queue()
-        self.scheduled_tasks = []
+        self.active = True
+        self.note = None
+        self.queue = queue.Queue()
+        self.screen = []  # OCR items of the last settled screen
+        self.pending = None  # event still waiting for its after-screen
+        self.pending_at = 0.0
+        self.shot = os.path.join(TRACE_DIR, f"{flow_name}_screen.png")
 
-# Active recorder context
-_ctx = RecorderContext("default")
-
-# Module-level aliases for backwards compatibility and test harnesses.
-# Each alias is a live property on the module that reads and writes the active
-# context, so `recorder._page_ref = page` reaches the code that uses _ctx.
-_ALIASES = {
-    "_events": "events",
-    "_flow_name": "flow_name",
-    "_recording_active": "active",
-    "_pending_annotation": "pending_annotation",
-    "_page_ref": "page_ref",
-    "_action_queue": "action_queue",
-    "_scheduled_tasks": "scheduled_tasks",
-}
-
-
-def _alias(attr: str) -> property:
-    return property(
-        lambda mod: getattr(mod._ctx, attr),
-        lambda mod, value: setattr(mod._ctx, attr, value),
-    )
-
-
-class _RecorderModule(types.ModuleType):
-    pass
-
-
-for _name, _attr in _ALIASES.items():
-    setattr(_RecorderModule, _name, _alias(_attr))
-
-sys.modules[__name__].__class__ = _RecorderModule
-
-
-def _nearest_label(x: int, y: int, img_path: str) -> str:
-    """Return the OCR text whose bounding-box centre is closest to (x, y)."""
-    try:
-        results = ocr.find_all(img_path)
-        return _nearest_label_from_items(x, y, results)
-    except Exception:
-        return ""
-
-
-def _nearest_label_from_items(x: int, y: int, items: list) -> str:
-    """Find closest OCR item to (x, y) without re-running OCR inference."""
-    best, best_dist = None, float("inf")
-    for r in items:
-        cx = (r["x1"] + r["x2"]) / 2
-        cy = (r["y1"] + r["y2"]) / 2
-        d = ((cx - x) ** 2 + (cy - y) ** 2) ** 0.5
-        if d < best_dist:
-            best_dist = d
-            best = r["text"]
-    return best or ""
-
-
-def _ocr_texts(img_path: str, page=None) -> list:
-    """Return flat list of visible text strings from a screenshot."""
-    try:
-        return [r["text"] for r in ocr.find_all(img_path, page)]
-    except Exception:
-        return []
-
-
-def _capture_after(event: dict, before_label: str, ts: int):
-    """
-    Take an after-screenshot, run OCR, and mutate the event dict.
-    Safely ignores undone events to prevent race conditions and trace corruption.
-    """
-    global _ctx
-    if not _ctx or event not in _ctx.events:
-        return  # Event was undone before after-capture completed
-
-    try:
-        after_path = os.path.join(TRACE_DIR, f"{_ctx.flow_name}_{ts}_after.png")
-        _ctx.page_ref.screenshot(path=after_path)
-        after_texts = _ocr_texts(after_path, _ctx.page_ref)
-        is_dynamic = bool(before_label) and before_label not in after_texts
-        event["screenshots"]["after"] = after_path
-        event["dynamic_label"] = is_dynamic
-        if is_dynamic:
-            print(f"[RECORDER] '{before_label}' vanished after click -> dynamic_label=True")
-    except Exception as e:
-        print(f"[RECORDER] After-state capture failed: {e}")
-
-
-def _handle_recorder_api(route, request):
-    """Network intercept route handler with payload validation."""
-    if request.method == "POST":
+    # ── wiring ────────────────────────────────────────────────────────────
+    def attach(self):
+        os.makedirs(TRACE_DIR, exist_ok=True)
+        self.page.expose_function("visorSendEvent", self._receive)
+        self.page.add_init_script(_JS)
+        self.page.on("framenavigated", self._navigated)
         try:
-            data = json.loads(request.post_data)
-            if isinstance(data, dict) and "type" in data and _ctx:
-                _ctx.action_queue.put(data)
-        except Exception as e:
-            print(f"[RECORDER] Failed to parse event: {e}")
-    route.fulfill(
-        status=200,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type"
-        },
-        content_type="application/json",
-        body='{"status":"ok"}'
-    )
-
-
-def _process_event(action: dict):
-    """Processes a single UI interaction event safely."""
-    global _ctx
-    if not _ctx or not isinstance(action, dict):
-        return
-
-    atype = action.get("type")
-    if atype == "click":
-        if "x" not in action or "y" not in action or "timestamp" not in action:
-            return
-        x, y, ts = action["x"], action["y"], action["timestamp"]
-        before_path = os.path.join(TRACE_DIR, f"{_ctx.flow_name}_{ts}_before.png")
-        try:
-            _ctx.page_ref.screenshot(path=before_path)
+            self.page.evaluate(_JS)  # the page that is already open
         except Exception:
-            before_path = None
+            pass
 
-        # Perform OCR once per click; an OCR failure must not end the session
+    def _receive(self, data):
+        if isinstance(data, dict) and data.get("type"):
+            data["t"] = time.time()
+            self.queue.put(data)
+
+    def _navigated(self, frame):
+        if frame == self.page.main_frame:
+            self.queue.put({"type": "navigate", "url": frame.url, "t": time.time()})
+
+    # ── reading the screen ────────────────────────────────────────────────
+    def read_screen(self) -> list:
+        """OCR of the page as a person sees it, with the recorder's own panel hidden."""
+        hide = "v => { const ui = document.getElementById('visor-recorder-ui'); if (ui) ui.style.visibility = v; }"
         try:
-            ocr_items = ocr.find_all(before_path, _ctx.page_ref) if before_path else []
+            self.page.evaluate(hide, "hidden")
+            self.page.screenshot(path=self.shot)
+            return ocr.find_all(self.shot, self.page)
         except Exception as e:
-            print(f"[RECORDER] OCR failed on before-state: {e}")
-            ocr_items = []
-        before_texts = [r["text"] for r in ocr_items]
-        clicked_label = _nearest_label_from_items(x, y, ocr_items)
-
-        event = {
-            "type": "click", "x": x, "y": y, "timestamp": ts,
-            "clicked_label": clicked_label,
-            "ocr_visible": before_texts,
-            "annotation": _ctx.pending_annotation,
-            "dynamic_label": False,
-            "screenshots": {"before": before_path, "after": None}
-        }
-        _ctx.events.append(event)
-        _ctx.pending_annotation = None
-        print(f"[RECORDER] Click at ({x},{y}) -> '{clicked_label}'")
-
-        # Pass event dict reference directly to prevent index drift on undo
-        _ctx.scheduled_tasks.append((
-            time.time() + 1.0,
-            lambda ev=event, lbl=clicked_label, t=ts: _capture_after(ev, lbl, t)
-        ))
-
-    elif atype == "annotation":
-        ann_text = action.get("text", "")
-        _ctx.pending_annotation = ann_text
-        print(f"[RECORDER] Annotation queued: '{ann_text}'")
-
-    elif atype == "undo":
-        if _ctx.events:
-            removed = _ctx.events.pop()
-            print(f"[RECORDER] Undid last event: {removed.get('clicked_label')}")
-
-    elif atype == "stop":
-        _ctx.active = False
-        print("[RECORDER] Stop triggered.")
-
-
-def _inject_recorder(page):
-    global _ctx
-    if _ctx:
-        _ctx.page_ref = page
-
-    page.route("**/visor-api-event", _handle_recorder_api)
-    page.add_init_script("""
-        window.visorSendEvent = function(data) {
-            fetch('/visor-api-event', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            }).catch(() => {});
-        };
-
-        document.addEventListener('click', (e) => {
-            if (e.target.closest('#visor-recorder-ui')) return;
-            const cc = document.getElementById('visor-click-count');
-            if (cc) cc.innerText = parseInt(cc.innerText || "0") + 1;
-            window.visorSendEvent({type: 'click', x: e.clientX, y: e.clientY, timestamp: Date.now()});
-        }, true);
-
-        function buildOverlay() {
-            if (document.getElementById('visor-recorder-ui')) return;
-            const ui = document.createElement('div');
-            ui.id = 'visor-recorder-ui';
-            ui.innerHTML = `
-                <div id="visor-panel" style="
-                    position: fixed; top: 20px; right: 20px; width: 320px;
-                    background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(14px);
-                    -webkit-backdrop-filter: blur(14px);
-                    border: 1px solid rgba(255,255,255,0.1); border-radius: 16px;
-                    padding: 16px; color: white; font-family: 'Inter', system-ui, sans-serif;
-                    z-index: 2147483647; display: flex; flex-direction: column; gap: 12px;
-                    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.55);
-                ">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <div style="width:10px;height:10px;border-radius:50%;background:#ef4444;animation:vPulse 2s infinite;"></div>
-                            <span style="font-weight:600;font-size:14px;">Visor Recording</span>
-                        </div>
-                        <button id="visor-stop-btn" style="background:rgba(239,68,68,.2);color:#ef4444;border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;">Stop</button>
-                    </div>
-                    <div style="font-size:11px;color:rgba(255,255,255,.55);background:rgba(0,0,0,.25);padding:6px 10px;border-radius:8px;display:flex;gap:12px;">
-                        <span>Clicks: <b id="visor-click-count">0</b></span>
-                        <span>Queued: <b id="visor-ann-queued">—</b></span>
-                    </div>
-                    <input type="text" id="visor-annotation-input" placeholder="Next click intent (auto-attaches)…" style="background:rgba(0,0,0,.3);color:white;border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:10px 12px;font-size:13px;outline:none;width:100%;box-sizing:border-box;"/>
-                    <div style="display:flex;gap:8px;">
-                        <button id="visor-annotation-btn" style="flex:1;background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:white;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;">Queue Annotation</button>
-                        <button id="visor-undo-btn" style="background:rgba(255,255,255,.08);color:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 14px;font-size:16px;cursor:pointer;" title="Undo last">↩</button>
-                    </div>
-                </div>
-                <style>
-                    @keyframes vPulse {
-                        0%   { transform:scale(.95); box-shadow:0 0 0 0 rgba(239,68,68,.7); }
-                        70%  { transform:scale(1);   box-shadow:0 0 0 6px rgba(239,68,68,0); }
-                        100% { transform:scale(.95); box-shadow:0 0 0 0 rgba(239,68,68,0); }
-                    }
-                    #visor-annotation-input:focus { border-color:#3b82f6 !important; }
-                </style>
-            `;
-            document.body.appendChild(ui);
-
-            document.getElementById('visor-annotation-btn').addEventListener('click', () => {
-                const input = document.getElementById('visor-annotation-input');
-                if (!input.value.trim()) return;
-                window.visorSendEvent({type: 'annotation', text: input.value.trim(), timestamp: Date.now()});
-                document.getElementById('visor-ann-queued').innerText = input.value.trim().slice(0, 20) + '…';
-                input.value = '';
-                const btn = document.getElementById('visor-annotation-btn');
-                btn.innerText = 'Queued!';
-                setTimeout(() => { btn.innerText = 'Queue Annotation'; }, 1600);
-            });
-
-            document.getElementById('visor-annotation-input').addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') document.getElementById('visor-annotation-btn').click();
-            });
-
-            document.getElementById('visor-undo-btn').addEventListener('click', () => {
-                window.visorSendEvent({type: 'undo'});
-                const cc = document.getElementById('visor-click-count');
-                if (cc && parseInt(cc.innerText) > 0) cc.innerText = parseInt(cc.innerText) - 1;
-            });
-
-            document.getElementById('visor-stop-btn').addEventListener('click', () => {
-                window.visorSendEvent({type: 'stop'});
-            });
-        }
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', buildOverlay);
-        } else {
-            buildOverlay();
-        }
-
-        const observer = new MutationObserver(() => {
-            if (!document.getElementById('visor-recorder-ui')) buildOverlay();
-        });
-        observer.observe(document.documentElement, { childList: true, subtree: true });
-    """)
-
-
-def start_recording(flow_name: str, url: str, description: str) -> str:
-    """Starts the browser in recording mode and blocks until stopped."""
-    os.makedirs(TRACE_DIR, exist_ok=True)
-    global _ctx
-    _ctx = RecorderContext(flow_name, url, description)
-    _ctx.active = True
-
-    print(f"[RECORDER] Starting recording for '{flow_name}'.")
-    page = browser.init_browser(headless=False, record_video=False)
-    _ctx.page_ref = page
-    _inject_recorder(page)
-
-    print(f"[RECORDER] Navigating to {url}")
-    page.goto(url)
-
-    stop_flag = os.path.join(TRACE_DIR, f"{flow_name}_stop.flag")
-    if os.path.exists(stop_flag):
-        os.remove(stop_flag)
-
-    print("[RECORDER] Active. Use the overlay to annotate. Click Stop or Ctrl+C to finish.")
-    try:
-        while _ctx.active and not os.path.exists(stop_flag):
-            while not _ctx.action_queue.empty():
-                _process_event(_ctx.action_queue.get_nowait())
-
-            now = time.time()
-            for task in list(_ctx.scheduled_tasks):
-                execute_at, func = task
-                if now >= execute_at:
-                    func()
-                    _ctx.scheduled_tasks.remove(task)
-
-            page.wait_for_timeout(50)
-    except KeyboardInterrupt:
-        print("\n[RECORDER] Stopped via Ctrl+C. Saving trace…")
-    except Exception as e:
-        print(f"\n[RECORDER] Browser or session ended ({e}). Saving trace…")
-    finally:
-        print("\n[RECORDER] Flushing final events and saving trace…")
-        if os.path.exists(stop_flag):
+            print(f"[RECORDER] Could not read the screen: {e}")
+            return []
+        finally:
             try:
-                os.remove(stop_flag)
-            except OSError:
-                pass
-
-        while not _ctx.action_queue.empty():
-            try:
-                _process_event(_ctx.action_queue.get_nowait())
-            except Exception as e:
-                print(f"[RECORDER] Dropped event during flush: {e}")
-        for execute_at, func in list(_ctx.scheduled_tasks):
-            try:
-                func()
+                self.page.evaluate(hide, "visible")
             except Exception:
                 pass
-        _ctx.scheduled_tasks.clear()
 
-        trace_file = os.path.join(TRACE_DIR, f"{flow_name}_trace.json")
-        with open(trace_file, "w") as f:
-            json.dump({
-                "flow": flow_name,
-                "url": url,
-                "description": description,
-                "events": _ctx.events
-            }, f, indent=2)
+    def _settle_pending(self):
+        """Read the screen after the last action and store what changed."""
+        after = self.read_screen()
+        if self.pending is not None:
+            before = [i["text"] for i in self.screen]
+            now = [i["text"] for i in after]
+            self.pending["appeared"] = [t for t in now if t not in before]
+            self.pending["disappeared"] = [t for t in before if t not in now]
+        self.screen = after
+        self.pending = None
 
-        print(f"[RECORDER] Saved trace -> {trace_file}")
-        _ctx.active = False
+    # ── events ────────────────────────────────────────────────────────────
+    def process(self, event: dict):
+        kind = event["type"]
+        if kind == "note":
+            self.note = event["text"]
+            return
+        if kind == "undo":
+            if self.events:
+                removed = self.events.pop()
+                print(f"[RECORDER] Undid {removed['type']} {removed.get('label', '')!r}")
+            return
+        if kind == "stop":
+            self.active = False
+            return
+        if self.pending is not None:
+            self._settle_pending()  # the person moved on before the page settled
+        if kind == "click":
+            event["label"] = _click_label(event, self.screen)
+        if self.note and kind != "navigate":
+            event["note"], self.note = self.note, None
+        self.events.append(event)
+        print(f"[RECORDER] {kind} {event.get('label') or event.get('url') or ''!r}")
+        self.pending, self.pending_at = event, time.time()
 
-    return trace_file
+    def tick(self):
+        while not self.queue.empty():
+            self.process(self.queue.get_nowait())
+        if self.pending is not None and time.time() - self.pending_at >= SETTLE:
+            self._settle_pending()
+
+    def finish(self):
+        self.tick()
+        if self.pending is not None:
+            self._settle_pending()
+        try:
+            os.remove(self.shot)
+        except OSError:
+            pass
+
+    def trace(self) -> dict:
+        return {"flow": self.flow_name, "url": self.url, "description": self.description,
+                "recorded_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                "events": self.events}
+
+
+def _click_label(event: dict, screen: list) -> str:
+    """The text a person would say they clicked: OCR inside the element, else its label."""
+    x, y = event["x"], event["y"]
+    left, top, right, bottom = event.get("rect") or (x, y, x, y)
+    inside = [i for i in screen if i["x1"] <= x <= i["x2"] and i["y1"] <= y <= i["y2"]]
+    if not inside:
+        inside = [i for i in screen if left - 2 <= i["x"] <= right + 2 and top - 2 <= i["y"] <= bottom + 2]
+    if inside:
+        return min(inside, key=lambda i: (i["x"] - x) ** 2 + (i["y"] - y) ** 2)["text"]
+    return event.get("text") or ""
+
+
+# ── turning a trace into a flow ──────────────────────────────────────────────
+
+def _pick_expect(appeared: list, label: str = "", typed=()):
+    """
+    Choose the text that proves a step worked, from the texts that appeared after it.
+    Short, wordy text (a status like "Request sent") beats counters, prices and paragraphs.
+    Text the person typed or chose earlier is skipped: the page echoing it back proves nothing.
+    """
+    label_n = ocr.normalize(label)
+    echoes = [ocr.normalize(t) for t in typed if len(ocr.normalize(t)) >= 3]
+    for text in appeared:
+        n = ocr.normalize(text)
+        if not n or n == label_n or len(n) > 40 or len(n.split()) > 6:
+            continue
+        if any(echo in n and len(echo) * 2 >= len(n) for echo in echoes):
+            continue  # "Plan Yearly" after choosing Yearly; "Results for dune" is still fine
+        if sum(c.isalpha() for c in n) < 3:  # "3", "12:04", "$9.99"
+            continue
+        return text
+    return None
+
+
+def _env_name(label: str) -> str:
+    name = re.sub(r"[^A-Z0-9]+", "_", (label or "").upper()).strip("_")
+    return f"VISOR_{name or 'SECRET'}"
+
+
+def _steps(trace: dict):
+    """The trace as flow steps: ([(call, args, comment)], env vars needed, goal text)."""
+    steps, envs, goal = [], [], None
+    last_action_at = None
+    typed = []  # values and options the person entered so far
+
+    def add(call, *args, comment=""):
+        steps.append([call, list(args), comment])
+
+    for i, e in enumerate(trace.get("events", [])):
+        kind = e["type"]
+        if kind == "navigate":
+            caused = last_action_at is not None and e["t"] - last_action_at <= NAV_AFTER_ACTION
+            if not (i == 0 or caused or e["url"] in ("about:blank", trace.get("url"))):
+                add("goto", repr(e["url"]))
+            continue
+        if kind == "scroll":
+            continue  # visor scrolls to find text by itself
+        last_action_at = e["t"]
+        if e.get("note"):
+            add("#", comment=e["note"])
+        expect = None
+
+        if kind == "click":
+            if not e.get("label"):
+                add("#", comment=f"clicked at ({e['x']:.0f}, {e['y']:.0f}) on something without text: add this step by hand")
+                continue
+            expect = _pick_expect(e.get("appeared", []), e["label"], typed)
+            add("click", repr(e["label"]), *([f"expect={expect!r}"] if expect else []))
+            if not expect and e["label"] in e.get("disappeared", []):
+                add("wait_gone", repr(e["label"]))
+        elif kind == "fill":
+            if e.get("secret"):
+                env = _env_name(e["label"])
+                envs.append(env)
+                add("fill", repr(e["label"]), f"os.environ[{env!r}]", comment="value not recorded")
+            else:
+                add("fill", repr(e["label"]), repr(e.get("value") or ""))
+                typed.append(e.get("value") or "")
+        elif kind == "select":
+            add("select", repr(e["label"]), repr(e["option"]))
+            typed.append(e["option"])
+        elif kind == "enter":
+            expect = _pick_expect(e.get("appeared", []), typed=typed)
+            if steps and steps[-1][0] == "fill":
+                steps[-1][1].append("enter=True")
+            else:
+                add("press_key", '"Enter"')
+            if expect:
+                add("wait_for", repr(expect))
+        if expect:
+            goal = expect
+    return steps, sorted(set(envs)), goal
+
+
+def synthesize(trace: dict, replay: str = "not run yet") -> str:
+    """Python source for a flow that repeats the trace, with a check after each step."""
+    steps, envs, goal = _steps(trace)
+    doc = [f"Recorded with `visor record` on {trace.get('recorded_at', '')[:10]} from {trace.get('url', '')}"]
+    if trace.get("description"):
+        doc.append(f"Task: {trace['description']}")
+    doc.append(f"Replay check: {replay}")
+    if envs:
+        doc.append("Set before running: " + ", ".join(envs))
+    doc.append("Read it before running it on many targets.")
+
+    out = ['"""', *doc, '"""']
+    if envs:
+        out.append("import os")
+    out += ["import visor", "", ""]
+    out.append(f"GOAL = {goal!r}" if goal else
+               "GOAL = None  # nothing appeared that proves success: put the text you expect at the end here")
+    out += ["", "", "def run(target):", "    visor.goto(target)"]
+    for call, args, comment in steps:
+        if call == "#":
+            out.append(f"    # {comment}")
+        else:
+            out.append(f"    visor.{call}({', '.join(args)})" + (f"  # {comment}" if comment else ""))
+    out += ['    return "success"', ""]
+    return "\n".join(out)
+
+
+# ── recording, end to end ────────────────────────────────────────────────────
+
+def record(flow_name: str, url: str, description: str = "") -> dict:
+    """Open the URL in a new tab and record until Stop, Ctrl+C or the tab closes."""
+    page = browser.new_tab()
+    rec = Recorder(page, flow_name, url, description)
+    rec.attach()
+    print(f"[RECORDER] Opening {url}")
+    page.goto(url, wait_until="domcontentloaded")
+    browser.settle(page)
+    rec.screen = rec.read_screen()
+    print("[RECORDER] Do the task once. Click Stop (bottom right) or press Ctrl+C when done.")
+    try:
+        while rec.active and not page.is_closed():
+            rec.tick()
+            page.wait_for_timeout(50)
+    except KeyboardInterrupt:
+        print("\n[RECORDER] Stopped with Ctrl+C.")
+    except Exception as e:
+        print(f"\n[RECORDER] Tab or browser closed ({e}).")
+    finally:
+        try:
+            rec.finish()
+        except Exception:
+            pass
+    trace = rec.trace()
+    path = os.path.join(TRACE_DIR, f"{flow_name}_trace.json")
+    with open(path, "w") as f:
+        json.dump(trace, f, indent=2, ensure_ascii=False)
+    print(f"[RECORDER] Saved trace -> {path}")
+    try:
+        browser.close_tab()  # the recording panel stays out of the replay
+    except Exception:
+        pass
+    return trace
+
+
+def replay(flow_path: str, url: str) -> str:
+    """Run the new flow once on the URL it was recorded on, with no agent, and return the status."""
+    from visor.cli import load_flow
+    from visor.config import settings
+    from visor.core import runner
+
+    flow_fn = load_flow(flow_path)
+    results_csv = os.path.join(TRACE_DIR, f"{os.path.splitext(os.path.basename(flow_path))[0]}_replay.csv")
+    if os.path.exists(results_csv):
+        os.remove(results_csv)
+    agent, settings.agent = settings.agent, False
+    try:
+        return runner.run_flow(flow_fn, [url], results_csv).get(url, "failed")
+    finally:
+        settings.agent = agent
+
+
+def write_flow(trace: dict, out_path: str, verify: bool = True) -> str:
+    """Write the flow file; replay it once and note the result in the file. Returns that result."""
+    with open(out_path, "w") as f:
+        f.write(synthesize(trace))
+    if not verify:
+        status = "skipped (--no-verify)"
+    elif _steps(trace)[2] is None:
+        status = "not run: no goal text to check against"
+    else:
+        result = replay(out_path, trace["url"])
+        status = (f"reached the goal on {trace['url']}" if result == "success"
+                  else f"FAILED ({result}); fix this file before using it")
+    with open(out_path, "w") as f:
+        f.write(synthesize(trace, replay=status))
+    return status

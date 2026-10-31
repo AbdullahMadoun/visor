@@ -4,7 +4,7 @@ visor entry point.
 Usage:
   visor --flow my_flow.py --targets targets.csv    run a flow over every target (same as `visor run`)
   visor run --flow my_flow.py --url https://...     run a flow on one or more URLs
-  visor record --flow name --url URL --description "goal"   (experimental: records clicks only)
+  visor record --flow name --url URL                 do a task once; get a flow file that checks itself
   visor login https://example.com                    log in by hand once; later runs reuse the session
   visor ocr [image.png | --url URL] [--find TEXT]    print what visor sees
   visor tree [--serve [--port N]]                    show the learned strategy tree (--serve: live map in the browser)
@@ -160,19 +160,30 @@ def cmd_run(argv: list) -> int:
 
 
 def cmd_record(argv: list) -> int:
-    parser = argparse.ArgumentParser(prog="visor record", description="Experimental: record a flow by clicking through it (clicks only; typing and scrolling are not captured yet)")
-    parser.add_argument("--flow", required=True)
-    parser.add_argument("--url", required=True, help="Start URL for recording")
-    parser.add_argument("--description", required=True, help="Goal description for synthesis")
+    parser = argparse.ArgumentParser(
+        prog="visor record",
+        description="Do a task once by hand; visor writes a flow file with a check after each step "
+                    "and replays it once to see that it reaches the goal.")
+    parser.add_argument("--flow", required=True, help="name of the new flow")
+    parser.add_argument("--url", required=True, help="start URL")
+    parser.add_argument("--description", default="", help="what the task is for (goes in the file)")
+    parser.add_argument("--out", help="where to write the flow (default: <flow>.py here)")
+    parser.add_argument("--no-verify", action="store_true", help="don't replay the new flow")
     args = parser.parse_args(argv)
 
-    print(f"--- Recording New Flow: {args.flow} ---")
-    from visor.core.recorder import start_recording
-    trace_file = start_recording(args.flow, args.url, args.description)
-
-    print(f"\n[DAEMON] Recording saved to {trace_file}")
-    print(f"[DAEMON] You can now ask your AI Agent to synthesize this flow into a Python script!")
-    return 0
+    from visor.core import recorder
+    out = args.out or f"{args.flow}.py"
+    if os.path.exists(out):
+        out = f"{os.path.splitext(out)[0]}.recorded.py"
+    configure(headless=False)
+    trace = recorder.record(args.flow, args.url, args.description)
+    if not trace["events"]:
+        print("[RECORDER] Nothing was recorded.")
+        return 1
+    status = recorder.write_flow(trace, out, verify=not args.no_verify)
+    print(f"\n[RECORDER] Wrote {out}. Replay check: {status}")
+    print(f"[RECORDER] Run it with: visor run --flow {out} --url URL")
+    return 0 if not status.startswith("FAILED") else 1
 
 
 def cmd_login(argv: list) -> int:
