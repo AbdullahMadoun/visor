@@ -54,6 +54,7 @@ GLOBAL_KEY = "_global"
 # Agent fixes waiting for proof, and fixes that failed it (shown to the agent next time)
 _probation = []   # [(keys, branch)]
 _rejected = []    # [{"branch": "...", "fix": {...}, "why": "..."}]
+_unreviewed = []  # review mode: proven fixes waiting for approval, used for the rest of this run only
 _in_target = False
 _current_target = None
 
@@ -171,7 +172,9 @@ def _commit_probation(proof: str):
         if pending is None:
             strategy_tree.set_branch(tree, keys, branch)
         else:
-            pending.append({"branch": ".".join(keys), "fix": branch})
+            name = ".".join(keys)
+            pending[:] = [p for p in pending if p.get("branch") != name] + [{"branch": name, "fix": branch}]
+            _unreviewed.append((keys, branch))
     if pending is None:
         print(f"[TREE] Saved {len(_probation)} proven branch(es)")
     else:
@@ -329,8 +332,19 @@ def recover(label: str, url: str = None, flow_key: str = None, bounds: dict = No
                     True, bounds, state, img_path, all_text)
 
 
-def _recover(label, url, flow_key, retry, bounds, state, img_path, all_text) -> str:
+def _tree_for_this_run() -> dict:
+    """tree.json, plus (in review mode) fixes this run proved that a person hasn't approved yet."""
     tree = strategy_tree.load()
+    for keys, branch in _unreviewed:
+        node = tree
+        for k in keys[:-1]:
+            node = node.setdefault(k, {})
+        node[keys[-1]] = branch
+    return tree
+
+
+def _recover(label, url, flow_key, retry, bounds, state, img_path, all_text) -> str:
+    tree = _tree_for_this_run()
 
     # Try contextual state match first, then fallback to stateless match
     not_found_branches = {}
@@ -575,6 +589,7 @@ def run_flow(flow_fn, targets: list, results_csv: str, max_retries: int = 1, flo
                     results[key] = status
 
     # While a flow runs, high-level actions escalate to the strategy tree / agent
+    _unreviewed.clear()  # unapproved fixes only ever apply to the run that proved them
     previous = (settings.heal, settings.flow)
     settings.heal = True
     settings.flow = flow_key or settings.flow or getattr(flow_fn, "__module__", "") or "default"

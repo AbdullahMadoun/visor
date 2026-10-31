@@ -19,6 +19,7 @@ def tree_file(tmp_path, monkeypatch):
     monkeypatch.setattr(strategy_tree, "TREE_PATH", str(path))
     monkeypatch.setattr(runner, "_probation", [])
     monkeypatch.setattr(runner, "_rejected", [])
+    monkeypatch.setattr(runner, "_unreviewed", [])
     return path
 
 
@@ -276,3 +277,31 @@ def test_failure_json_includes_the_controls(live, monkeypatch, tmp_path):
     payload = json.loads((tmp_path / "failure.json").read_text())
     assert {"role": "button", "name": "Settings"}.items() <= next(
         c for c in payload["controls"] if c["name"] == "Settings").items()
+
+
+def test_unreviewed_fix_is_used_for_the_rest_of_the_run_but_not_saved(tree_file, monkeypatch):
+    monkeypatch.setattr(settings, "review", True)
+    for url in ("https://example.com/event/2", "https://example.com/event/3"):
+        runner._hold(FIX)
+        runner._commit_probation(url)
+    assert saved(tree_file) == {}
+    assert len(strategy_tree.load_side(strategy_tree.PENDING)) == 1  # proven twice, listed once
+    live_tree = runner._tree_for_this_run()
+    assert live_tree["events"]["find_Join"]["not_found"]["More_visible"]["target"] == "More"
+    runner.run_flow(lambda t: "success", [], str(tree_file.parent / "r.csv"))  # a new run
+    assert runner._tree_for_this_run() == {}
+
+
+def test_stopping_a_review_keeps_the_decisions_made(tree_file, monkeypatch):
+    monkeypatch.setattr(settings, "review", True)
+    runner._hold(FIX)
+    runner._hold({"save_to_tree": {"events.find_Leave.not_found.Menu_visible": {"action": "click_ocr", "target": "Menu"}}})
+    runner._commit_probation("https://example.com/event/2")
+    def ask(prompt, answers=iter(["a"])):
+        try:
+            return next(answers)
+        except StopIteration:
+            raise KeyboardInterrupt
+    assert strategy_tree.review(ask=ask) == 1
+    assert "events" in saved(tree_file)
+    assert strategy_tree.load_side(strategy_tree.PENDING)[0]["branch"] == "events.find_Leave.not_found.Menu_visible"

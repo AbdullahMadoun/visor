@@ -67,7 +67,12 @@ def review(ask=input) -> int:
         keys, branch = item["branch"].split("."), item["fix"]
         print(f"\n({n}/{len(pending)}) {item['branch']}")
         print(json.dumps(branch, indent=2, ensure_ascii=False))
-        answer = (ask("[a]pprove, [r]eject, or Enter to decide later: ") or "").strip().lower()
+        try:
+            answer = (ask("[a]pprove, [r]eject, or Enter to decide later: ") or "").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            left.extend(pending[n - 1:])  # stopped: keep what was decided, the rest stays pending
+            break
         if answer.startswith("a"):
             set_branch(load(), keys, branch)
         elif answer.startswith("r"):
