@@ -3,7 +3,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="visor",
+    name="visor-browser",
     version="0.2.0",
     description="Self-healing browser automation that reads the screen: click, fill and verify by visible text.",
     package_dir={"": "src"},
@@ -21,6 +21,7 @@ setup(
     extras_require={
         "easyocr": ["easyocr>=1.7.1"],
         "mac": ["ocrmac>=1.0.0"],
+        "agent": ["anthropic>=2.3"],
         "dev": ["pytest>=7.4.0"]
     },
     entry_points={

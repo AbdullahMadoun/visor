@@ -3,7 +3,7 @@ requires = ["setuptools>=61,<80", "wheel"]  # <80: setuptools 80+ breaks `pip in
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "visor"
+name = "visor-browser"  # `visor` on PyPI is an unrelated project; the import name is still `visor`
 version = "0.2.0"
 description = "Self-healing browser automation that reads the screen: click, fill and verify by visible text."
 readme = "README.md"

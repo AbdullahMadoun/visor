@@ -1,0 +1,23 @@
+# Publishes to PyPI as `visor-browser` when a GitHub release is published.
+# One-time setup on pypi.org (no token needed): Account → Publishing → add a "pending publisher"
+# with project visor-browser, owner AbdullahMadoun, repository visor, workflow release.yml,
+# environment pypi.
+name: release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine && python -m build && twine check dist/*
+      - uses: pypa/gh-action-pypi-publish@release/v1
