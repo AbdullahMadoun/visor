@@ -106,6 +106,11 @@ def _signal_agent(step: str, url: str, ocr_found: list, screenshot_path: str,
         page_url = None
     if page_url and page_url != url:
         payload["page_url"] = page_url
+    if settings.controls and "controls" not in payload and browser._page is not None:
+        # What can be clicked, by accessible name: icon-only buttons OCR can't read show up here
+        found = actions.controls(visible_text=ocr_found)
+        if found:
+            payload["controls"] = found
     rejected = _rejected_for_agent()
     if rejected:
         payload["rejected_fixes"] = rejected  # earlier answers that were tried and did not work
@@ -249,7 +254,7 @@ def _goal_not_met(goal, url: str, error: str = None) -> str:
     if action == "retry":
         return "retry_target"
     if action == "ocr_click":
-        match = actions.locate(fix["target"])
+        match = actions.locate_target(fix["target"])
         if match:
             actions.press(match)
             clicker.short_wait()
@@ -354,7 +359,7 @@ def _recover(label, url, flow_key, retry, bounds, state, img_path, all_text) -> 
                     return "failed"
 
                 # Maintain bounds mapping even in fallback if applicable
-                target_match = actions.locate(target, exact=bool(bounds), region=bounds, img_path=img_path)
+                target_match = actions.locate_target(target, exact=bool(bounds), region=bounds, img_path=img_path)
 
                 if target_match:
                     actions.press(target_match)
@@ -407,7 +412,7 @@ def _apply_fix(fix, label, url, flow_key, bounds, state) -> str:
     if fix.get("action") == "skip":
         return f"skipped:{fix.get('reason', 'agent')}"
     elif fix.get("action") == "ocr_click":
-        target_match = actions.locate(fix["target"])
+        target_match = actions.locate_target(fix["target"])
         if target_match:
             actions.press(target_match)
             clicker.short_wait()

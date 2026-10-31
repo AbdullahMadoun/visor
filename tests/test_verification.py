@@ -239,3 +239,40 @@ def test_review_can_reject_or_defer(tree_file, monkeypatch):
     assert saved(tree_file) == {}
     assert strategy_tree.load_side(strategy_tree.REJECTED)[-1]["why"] == "rejected by a reviewer"
     assert strategy_tree.load_side(strategy_tree.PENDING)[0]["branch"] == "events.find_Leave.not_found.Menu_visible"
+
+
+# ── The controls list: what the agent can name besides visible text ──────────
+
+def test_controls_lists_icon_buttons_by_name_and_skips_covered_or_offscreen(live):
+    import visor
+    from visor.core import actions
+    visor.goto(page_url("shop.html"))
+    found = {(c["role"], c["name"]): c for c in actions.controls(visible_text=visor.read())}
+    assert found[("button", "Settings")]["on_screen_text"] is False  # icon only: ⚙
+    assert found[("button", "Checkout")]["on_screen_text"] is True
+    assert ("textbox", "Email address") in found  # named by its <label>
+    assert ("button", "Load more") not in found   # below the fold
+
+    visor.goto(page_url("covered.html"))
+    names = [c["name"] for c in actions.controls()]
+    assert "Open settings" in names
+    assert "View profile" not in names  # painted over by "Language"; a click would hit that instead
+
+
+def test_agent_can_name_an_icon_only_control_from_the_list(live):
+    import visor
+    from conftest import log_text
+    visor.goto(page_url("shop.html"))
+    status = runner._apply_fix({"action": "ocr_click", "target": "Settings"}, "Preferences",
+                               visor.page().url, "shop", None, None)
+    assert status == "agent_fixed" and log_text() == "settings"
+
+
+def test_failure_json_includes_the_controls(live, monkeypatch, tmp_path):
+    import visor
+    visor.goto(page_url("shop.html"))
+    _handshake_files(monkeypatch, tmp_path)
+    runner._signal_agent("find_Preferences", visor.page().url, visor.read(), "")
+    payload = json.loads((tmp_path / "failure.json").read_text())
+    assert {"role": "button", "name": "Settings"}.items() <= next(
+        c for c in payload["controls"] if c["name"] == "Settings").items()

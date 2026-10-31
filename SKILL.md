@@ -77,9 +77,11 @@ The script pauses and writes `agent_handshake/failure.json` when:
 
 `failure.json` also lists `rejected_fixes`: branches suggested earlier for this flow (in this run or an earlier one) that were tried and did not reach the goal, or that a person rejected in review. Don't suggest them again.
 
+`failure.json` also lists `controls`: the clickable things on screen (not covered by anything), as `{role, name, x, y, disabled, on_screen_text}`. `on_screen_text: false` means the name can't be read on screen, such as an icon-only ⚙ button named "Settings". An `ocr_click` target can be any of these names: Visor looks for the text first, then for a control with that accessible name. Turn the list off with `VISOR_CONTROLS=0`.
+
 **When AGENT_NEEDED fires:**
 1. **Do NOT just retry the same thing.**
-2. **Read `ocr_results` in `failure.json` — this is your complete perception of the screen.** Every visible string on the page at the moment of failure is in this array. Reason from it. You do NOT need to view the screenshot.
+2. **Read `ocr_results` and `controls` in `failure.json`: together they are your perception of the screen.** `ocr_results` is every visible string; `controls` adds what can be clicked, including icon-only buttons. Reason from them. You do NOT need to view the screenshot.
 3. **Generate DIVERGENT Hypotheses (Never Tunnel-Vision)**: Do not get stuck endlessly retrying one failed path. You must explicitly brainstorm multiple, equally smart, laterally divergent paths. Look for "tricks" or alternative ways around the UI. (e.g., Is there a modal? Hit Escape. Is the button hidden? Try zooming out. Is the main flow blocked? Search for an alternative entry point in a dropdown. Can we force it via DOM evaluate?).
 4. **Write fix.json** to mutate the strategy tree, or fix the code and relaunch.
 5. **Your fix is on probation.** A `save_to_tree` branch is written to `tree.json` only after the target reaches its goal. If it doesn't, the branch is thrown away and shows up in `rejected_fixes`. If the run uses `--review`, a proven branch still waits for a person to approve it with `visor tree --review`. Add a `reason` saying why you think the fix is right; it is saved with the branch.

@@ -158,7 +158,7 @@ The goal is the one thing you define. Whether each step along the way worked is 
 While a flow runs, a `visor.click` that cannot find its target doesn't just fail:
 
 1. **Strategy tree.** Visor checks `tree.json` for a known fix for this flow and step, such as "if *More* is visible, click it, then look again". Known fixes run instantly, with no AI involved.
-2. **Agent handshake.** If the tree has no answer, Visor writes `agent_handshake/failure.json` (the step, URL and all visible text) and waits for an agent (Claude, Gemini, or you) to write `fix.json`. A fix can include `save_to_tree`, which turns it into a tree branch, and a `reason`, which is saved with it.
+2. **Agent handshake.** If the tree has no answer, Visor writes `agent_handshake/failure.json` (the step, URL, all visible text, and the on-screen controls by accessible name, so icon-only buttons are listed too) and waits for an agent (Claude, Gemini, or you) to write `fix.json`. A fix can include `save_to_tree`, which turns it into a tree branch, and a `reason`, which is saved with it.
    - **Fixes are on probation.** A new branch is written to `tree.json` only after the target it was made for succeeds (reaches its `GOAL`, if the flow has one), and it is saved with the URL that proved it. A skip proves nothing, so a skip rule is never saved automatically. If the target still fails, the branch is dropped and recorded in `rejected.json` next to the tree; later `failure.json` files for the same flow list it under `rejected_fixes`, in this run and the next ones, so the agent doesn't suggest the same thing again.
    - **Review mode.** With `--review` (or `VISOR_REVIEW=1`), proven fixes wait in `pending.json` instead of going into the tree. `visor tree --review` shows each one and asks you to approve or reject it. Use it when the agent reads pages you don't trust.
    - **Lessons shared by flows.** Branches under the `_global` key are used by any flow that has no branch of its own for that step (for example, `_global.find_Apply.not_found.Sold_out_visible`). They are keyed by the label being looked for, like every branch.
@@ -205,6 +205,7 @@ Set environment variables before starting, or call `visor.configure(...)` at run
 | `ocr_langs` | `VISOR_OCR_LANGS` | | e.g. `en,ar` |
 | `agent` | `VISOR_AGENT` | `True` | wait for `fix.json` on unknown failures |
 | `agent_timeout` | `VISOR_AGENT_TIMEOUT` | `600` | seconds |
+| `controls` | `VISOR_CONTROLS` | `True` | list on-screen controls (role and accessible name) in `failure.json` |
 | `review` | `VISOR_REVIEW` | `False` | proven fixes wait for `visor tree --review` |
 | `human` | `VISOR_HUMAN` | `True` | pause for you on captchas / 2FA |
 | `human_timeout` | `VISOR_HUMAN_TIMEOUT` | `900` | seconds |

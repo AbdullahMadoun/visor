@@ -100,6 +100,43 @@ _KIN_JS = "([anchor, points]) => {" + _SHARED_JS + """
   });
 }"""
 
+# Every control a person could click right now, by role and accessible name. Only controls that are
+# on screen and painted on top at their centre (not covered), so the list matches what can be clicked.
+_CONTROLS_JS = "(limit) => {" + _SHARED_JS + """
+  const SEL = 'button,a[href],summary,select,textarea,input:not([type=hidden]),[role=button],[role=link],' +
+              '[role=menuitem],[role=tab],[role=checkbox],[role=radio],[role=switch],[role=combobox],[role=option]';
+  const roleOf = (el) => el.getAttribute('role') || ({A: 'link', SELECT: 'combobox', TEXTAREA: 'textbox',
+      SUMMARY: 'button', BUTTON: 'button'}[el.tagName] ||
+      (el.tagName === 'INPUT' ? ({checkbox: 'checkbox', radio: 'radio', submit: 'button', button: 'button',
+                                  search: 'searchbox'}[el.type] || 'textbox') : el.tagName.toLowerCase()));
+  const nameOf = (el) => {
+    const by = el.getAttribute('aria-labelledby');
+    const ref = by && by.split(/\\s+/).map((id) => document.getElementById(id)).filter(Boolean)
+                        .map((n) => n.innerText).join(' ');
+    const img = el.querySelector && el.querySelector('img[alt],svg[aria-label]');
+    const lab = el.labels && el.labels[0] && el.labels[0].innerText;
+    return (el.getAttribute('aria-label') || ref || lab || (el.innerText || '').trim() || el.getAttribute('title') ||
+            (img && (img.getAttribute('alt') || img.getAttribute('aria-label'))) ||
+            el.getAttribute('placeholder') || (el.type === 'submit' && el.value) || '').replace(/\\s+/g, ' ').trim();
+  };
+  const out = [], seen = new Set();
+  for (const el of document.querySelectorAll(SEL)) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2 || r.bottom <= 0 || r.right <= 0 || r.top >= innerHeight || r.left >= innerWidth) continue;
+    const x = Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1), y = Math.min(Math.max(r.top + r.height / 2, 0), innerHeight - 1);
+    const top = topAt(x, y);
+    if (!top || !(top === el || el.contains(top) || top.control === el || (top.closest && top.closest('label') && top.closest('label').control === el))) continue;
+    const name = nameOf(el).slice(0, 80);
+    const key = roleOf(el) + '|' + name;
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    out.push({role: roleOf(el), name, x: Math.round(x), y: Math.round(y),
+              disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true')});
+    if (out.length >= limit) break;
+  }
+  return out;
+}"""
+
 # The input a visible label belongs to: under it, its <label> control, or the nearest field below/right
 _FIELD_JS = "([x1, y1, x2, y2]) => {" + _SHARED_JS + """
   const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
@@ -599,6 +636,31 @@ def goto(url: str) -> str:
     except Exception as e:
         raise NavigationError(f"Could not load {url}: {e}") from e
     return browser.get_page().url
+
+
+def controls(limit: int = 60, visible_text: list = None) -> list:
+    """
+    The clickable controls on screen, by role and accessible name, for an agent deciding a fix.
+    With visible_text (OCR's strings), each control notes whether its name can be read on screen:
+    the ones that can't are icon-only, and only reachable by name.
+    """
+    try:
+        found = browser.get_page().evaluate(_CONTROLS_JS, limit)
+    except Exception:
+        return []
+    if visible_text is not None:
+        seen = ocr.normalize(" ".join(visible_text)).replace(" ", "")
+        for c in found:
+            c["on_screen_text"] = ocr.normalize(c["name"]).replace(" ", "") in seen
+    return found
+
+
+def locate_target(label, **kw) -> Optional[dict]:
+    """A fix's target: by visible text first, then by accessible name (it may come from failure.json's controls)."""
+    found = locate(label, **kw)
+    if found is None and settings.dom_fallback:
+        found = _dom_locate(_labels(label), "click")
+    return found
 
 
 def locate(label, *, exact: bool = False, near=None, index: int = None, region=None,

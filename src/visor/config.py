@@ -65,6 +65,7 @@ class Settings:
     # Runner / self-healing
     agent: bool = field(default_factory=lambda: _env_bool("VISOR_AGENT", True))  # wait for fix.json on unknown failures
     agent_timeout: float = field(default_factory=lambda: _env_float("VISOR_AGENT_TIMEOUT", 600.0))
+    controls: bool = field(default_factory=lambda: _env_bool("VISOR_CONTROLS", True))  # list on-screen controls in failure.json
     review: bool = field(default_factory=lambda: _env_bool("VISOR_REVIEW", False))  # proven fixes wait for `visor tree --review`
     heal: bool = False  # high-level actions escalate to the strategy tree / agent (on while run_flow runs)
     human: bool = field(default_factory=lambda: _env_bool("VISOR_HUMAN", True))  # pause for you on captchas / 2FA
