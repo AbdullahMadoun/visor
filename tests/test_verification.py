@@ -305,3 +305,16 @@ def test_stopping_a_review_keeps_the_decisions_made(tree_file, monkeypatch):
     assert strategy_tree.review(ask=ask) == 1
     assert "events" in saved(tree_file)
     assert strategy_tree.load_side(strategy_tree.PENDING)[0]["branch"] == "events.find_Leave.not_found.Menu_visible"
+
+
+def test_branch_condition_needs_the_whole_words_on_screen(live, tree_file, monkeypatch):
+    import visor
+    from conftest import log_text
+    monkeypatch.setattr(settings, "agent", False)
+    strategy_tree.save({"events": {"find_Join": {"not_found": {"More_visible": {
+        "action": "click_ocr", "target": "More", "then": "retry_find_Join"}}}}})
+    visor.goto(page_url("learn_more.html"))  # only "Learn more about our events"
+    assert runner.recover("Join", flow_key="events") == "failed"  # the branch must not fire
+    visor.goto(page_url("learn_more.html") + "?menu=1")  # a real "More" button
+    assert runner.recover("Join", flow_key="events") == "success"
+    assert log_text() == "joined"

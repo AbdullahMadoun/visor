@@ -154,7 +154,8 @@ Tells the engine that the objective of the current step was met via manual agent
 
 **Tree update rules:**
 - Every diagnosed failure → new branch, saved once it is proven (it gets `proven_on` and `learned_at`).
-- Keys format: `<flow>.<step>.<not_found|other>.<VisibleElement_visible>`.
+- Keys format: `<flow>.<step>.<not_found|other>.<VisibleElement_visible>`. The condition holds only when those whole words are on screen as a label or a short line ("More", "This event is sold out"), never inside body text ("Learn more about our events"). `default` always holds and is tried last.
+- In a branch the click action is `click_ocr`; in `fix.json` it is `ocr_click`. Either spelling is accepted in both places.
 - Lessons about the web in general go under `_global` instead of a flow name, e.g. `_global.find_Apply.not_found.Sold_out_visible` → `skip`. Every flow uses them when it has no branch of its own.
 - Never delete proven branches — they encode hard-won knowledge.
 - `visor tree --serve` shows the tree live in a browser.

@@ -57,6 +57,7 @@ class Settings:
     # Actions
     timeout: float = field(default_factory=lambda: _env_float("VISOR_TIMEOUT", 8.0))  # how long click/wait_for keep looking
     scroll_search: bool = True  # scroll to find text that is off screen
+    scale: float = field(default_factory=lambda: _env_float("VISOR_SCALE", 2.0))  # pixel density of browsers visor launches
     max_scrolls: int = 8
     dom_fallback: bool = True  # last resort: find icon-only buttons by accessible name
     auto_dismiss: bool = True  # close cookie banners / overlays that block a click

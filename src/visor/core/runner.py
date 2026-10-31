@@ -29,7 +29,6 @@ import csv
 import importlib
 import importlib.util
 from datetime import datetime
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 
 from visor.config import settings
@@ -47,6 +46,9 @@ DONE_STATUSES = ("success", "agent_fixed")
 
 # How many times one target may be restarted (restart_flow) in a row before it counts as failed
 MAX_RESTARTS = 3
+
+# A fix (fix.json) says "ocr_click", a saved branch (tree.json) says "click_ocr": both mean the same
+CLICK_ACTIONS = ("ocr_click", "click_ocr")
 
 # Tree branches every flow can use, e.g. "a 'More' menu hides the button"
 GLOBAL_KEY = "_global"
@@ -256,45 +258,14 @@ def _goal_not_met(goal, url: str, error: str = None) -> str:
         return "restart_flow"
     if action == "retry":
         return "retry_target"
-    if action == "ocr_click":
+    if action in CLICK_ACTIONS:
         match = actions.locate_target(fix["target"])
         if match:
             actions.press(match)
             clicker.short_wait()
-    if action in ("ocr_click", "agent_fixed"):
+    if action in CLICK_ACTIONS + ("agent_fixed",):
         return "success" if goal_met(goal) else "failed"
     return "failed"
-
-
-def safe_dom_action(func, *args, **kwargs):
-    """
-    Executes a Playwright DOM locator action (like bounding_box) safely.
-    If it hits a TimeoutError, it catches it and triggers the AGENT_NEEDED protocol
-    instead of violently crashing the Python process.
-    """
-    try:
-        return func(*args, **kwargs)
-    except PlaywrightTimeoutError as e:
-        print(f"[DOM_ISOLATION] Caught Playwright TimeoutError: {e}")
-        ss_path = _save_screenshot("dom_timeout")
-        fix = _signal_agent("safe_dom_action", browser.get_page().url, [], ss_path)
-        return {"error": "timeout", "fix": fix}
-
-
-def scroll_and_collect(target_label: str, max_scrolls: int = 10, scroll_delay_ms: int = 2000) -> bool:
-    """
-    Native scroller and list pagination manager.
-    Scrolls down the page until target_label becomes visible via OCR.
-    """
-    print(f"[RUNNER] Scrolling to find '{target_label}'...")
-    for i in range(max_scrolls):
-        img_path = browser.screenshot()
-        if img_path and ocr.find(target_label, img_path, exact=False):
-            print(f"[RUNNER] Found '{target_label}' after {i} scrolls.")
-            return True
-        browser.scroll_down(wait_ms=scroll_delay_ms)
-    print(f"[RUNNER] Failed to find '{target_label}' after {max_scrolls} scrolls.")
-    return False
 
 
 def ocr_find_and_click(label: str, url: str, flow_key: str, retry: bool = True, bounds: dict = None, state: str = None) -> str:
@@ -332,6 +303,16 @@ def recover(label: str, url: str = None, flow_key: str = None, bounds: dict = No
                     True, bounds, state, img_path, all_text)
 
 
+def _condition_visible(label: str, all_text: list) -> bool:
+    """A branch's condition ("More_visible") holds only if those whole words are on screen as a
+    label or a short line, not inside body text: "Learn more about our events" doesn't count."""
+    items = [{"text": t, "confidence": 1.0, "order": i,
+              "words": [{"text": w, "x1": 0, "y1": 0, "x2": 0, "y2": 0} for w in t.split()]}
+             for i, t in enumerate(all_text) if t and t.strip()]
+    matches = ocr.find_matches(label, exact=True, min_conf=0, items=items)
+    return any(m["tier"] >= ocr.PROOF_TIER for m in matches)
+
+
 def _tree_for_this_run() -> dict:
     """tree.json, plus (in review mode) fixes this run proved that a person hasn't approved yet."""
     tree = strategy_tree.load()
@@ -360,11 +341,11 @@ def _recover(label, url, flow_key, retry, bounds, state, img_path, all_text) -> 
     for condition, branch in sorted(not_found_branches.items(), key=lambda kv: kv[0] == "default"):
         # Check if the condition element is visible in OCR
         condition_label = condition.replace("_visible", "").replace("_", " ")
-        if any(condition_label.lower() in t.lower() for t in all_text) or condition == "default":
+        if condition == "default" or _condition_visible(condition_label, all_text):
             print(f"[TREE] Matched condition '{condition}' → action: {branch['action']}")
             if branch["action"] == "skip":
                 return f"skipped:{branch.get('reason', 'unknown')}"
-            elif branch["action"] == "click_ocr":
+            elif branch["action"] in CLICK_ACTIONS:
                 target = branch["target"]
                 if not retry:
                     # We are re-checking after this fallback already ran: clicking it again would
@@ -425,7 +406,7 @@ def _recover(label, url, flow_key, retry, bounds, state, img_path, all_text) -> 
 def _apply_fix(fix, label, url, flow_key, bounds, state) -> str:
     if fix.get("action") == "skip":
         return f"skipped:{fix.get('reason', 'agent')}"
-    elif fix.get("action") == "ocr_click":
+    elif fix.get("action") in CLICK_ACTIONS:
         target_match = actions.locate_target(fix["target"])
         if target_match:
             actions.press(target_match)
@@ -442,17 +423,6 @@ def _apply_fix(fix, label, url, flow_key, bounds, state) -> str:
         return "restart_flow"
 
     return "failed"
-
-
-def verify_ocr(label: str) -> bool:
-    """Take fresh screenshot and verify label is present."""
-    img_path = browser.screenshot()
-    if not img_path:
-        return False
-    match = ocr.find(label, img_path, exact=True)
-    all_text = ocr.summarize(img_path)
-    print(f"[VERIFY] Looking for '{label}'. OCR found: {all_text}")
-    return match is not None
 
 
 def _reload_module(mod):

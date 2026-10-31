@@ -1,0 +1,13 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Learn more</title></head>
+<body style="font: 22px Helvetica, Arial, sans-serif; margin: 40px">
+  <!-- "more" appears inside a sentence, but there is no "More" menu to open. The buttons keep the
+       browser default 13px font: OCR misses them at 1x pixel density, reads them at 2x (VISOR_SCALE). -->
+  <h2>Community meetup</h2>
+  <p>Learn more about our events on the blog.</p>
+  <p id="log">Ready</p>
+  <div id="menu" style="display:none"><button onclick="document.getElementById('log').textContent='joined'">Join</button></div>
+  <button id="more" style="display:none" onclick="document.getElementById('menu').style.display='block'">More</button>
+  <script>
+    if (new URLSearchParams(location.search).get('menu') === '1') document.getElementById('more').style.display = 'inline';
+  </script>
+</body></html>

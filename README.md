@@ -206,6 +206,7 @@ Set environment variables before starting, or call `visor.configure(...)` at run
 | `agent` | `VISOR_AGENT` | `True` | wait for `fix.json` on unknown failures |
 | `agent_timeout` | `VISOR_AGENT_TIMEOUT` | `600` | seconds |
 | `ocr_only` | `VISOR_OCR_ONLY` | `False` | switch `visor.page()` off, so your code sees the page only through OCR |
+| `scale` | `VISOR_SCALE` | `2` | pixel density of browsers Visor launches (OCR misses small text at 1) |
 | `controls` | `VISOR_CONTROLS` | `True` | list on-screen controls (role and accessible name) in `failure.json` |
 | `review` | `VISOR_REVIEW` | `False` | proven fixes wait for `visor tree --review` |
 | `human` | `VISOR_HUMAN` | `True` | pause for you on captchas / 2FA |

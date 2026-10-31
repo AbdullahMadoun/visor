@@ -61,7 +61,9 @@ def init_browser(headless=None, record_video=False):
                 args=[f"--remote-debugging-port={_cdp_port()}", "--no-sandbox", "--disable-dev-shm-usage"]
             )
 
-            context_kwargs = {"viewport": {"width": settings.viewport[0], "height": settings.viewport[1]}, "locale": "en-US"}
+            context_kwargs = {"viewport": {"width": settings.viewport[0], "height": settings.viewport[1]}, "locale": "en-US",
+                              # OCR reads small text far better at 2x (a 13px button label is missed at 1x)
+                              "device_scale_factor": settings.scale}
             if record_video:
                 video_dir = os.path.join(WORKSPACE_DIR, "videos")
                 os.makedirs(video_dir, exist_ok=True)
