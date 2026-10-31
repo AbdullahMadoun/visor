@@ -252,7 +252,7 @@ The bet: for repeatable tasks, the expensive part (a model looking at the page) 
 
 ## A small benchmark
 
-So far, Visor has been run on part of the BU Bench V1 task set (Online-Mind2Web, GAIA, BrowseComp, WebBench read tasks and interaction tests). The agent was Gemini 3.8 Flash, which reached the web *only* through Python scripts it wrote with Visor: built-in browser, screenshot and web tools were blocked.
+So far, Visor has been run on part of the BU Bench V1 task set (Online-Mind2Web, GAIA, BrowseComp, WebBench read tasks and interaction tests). The agent was Gemini 3.8 Flash (high reasoning setting, run through the Antigravity CLI), picked on purpose as a cheap model rather than a frontier one. It reached the web *only* through Python scripts it wrote with Visor: built-in browser, screenshot and web tools were blocked.
 
 | Category | Passed |
 |---|---|

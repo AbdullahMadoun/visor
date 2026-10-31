@@ -65,7 +65,7 @@ If it hits a captcha or a two-factor prompt, Visor does not try to get around it
 
 ## A small test
 
-I wanted at least some numbers before showing this to anyone. I gave Gemini 3.8 Flash the Visor skill file and some tasks from BU Bench V1 (a mix of Online-Mind2Web, GAIA, BrowseComp and interaction tests). The only way it could touch the web was by writing Python scripts that use Visor. Its built-in browser and screenshot tools were blocked.
+I wanted at least some numbers before showing this to anyone. I gave Gemini 3.8 Flash (on its high setting, through the Antigravity CLI) the Visor skill file and some tasks from BU Bench V1 (a mix of Online-Mind2Web, GAIA, BrowseComp and interaction tests). I picked a cheap model on purpose: if a cheap model can drive it, the harness is doing the work. The only way it could touch the web was by writing Python scripts that use Visor. Its built-in browser and screenshot tools were blocked.
 
 So far 30 of the finished runs are graded: **28 passed**, and the 2 failures were timeouts at 20 minutes. The median task took about 8 minutes. And the part I like most: across all 30 runs, the model looked at **zero screenshots**. Everything it knew about the pages came from OCR text.
 
