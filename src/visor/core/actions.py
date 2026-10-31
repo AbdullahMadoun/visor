@@ -79,9 +79,24 @@ _PROBE_JS = "(points) => {" + _SHARED_JS + """
       disabled: !!(control && (control.disabled || control.getAttribute('aria-disabled') === 'true' ||
                                (control.closest && control.closest('fieldset[disabled]')))),
       text: names(node),
+      side: !!closest(node, 'aside,[role=complementary]'),
       layer: kind,
       layerText: layer ? (layer.innerText || '').slice(0, 600) : '',
     };
+  });
+}"""
+
+# How closely each point is related to the anchor in the page: the depth of their deepest shared
+# container (0 if unknown). A form's button shares the form with its heading; a sidebar link doesn't.
+_KIN_JS = "([anchor, points]) => {" + _SHARED_JS + """
+  const chain = (el) => { const out = []; for (let n = el; n; n = up(n)) out.push(n); return out; };
+  const a = topAt(anchor[0], anchor[1]);
+  if (!a) return points.map(() => 0);
+  const mine = new Set(chain(a));
+  return points.map(([x, y]) => {
+    const el = topAt(x, y);
+    const shared = el && chain(el).find((n) => mine.has(n));
+    return shared ? chain(shared).length : 0;
   });
 }"""
 
@@ -193,6 +208,14 @@ def _probe(points: list) -> list:
         return [None] * len(points)
 
 
+def _kin(anchor, points: list) -> list:
+    try:
+        return browser.get_page().evaluate(_KIN_JS, [[float(anchor[0]), float(anchor[1])],
+                                                     [[float(x), float(y)] for x, y in points]])
+    except Exception:
+        return [0] * len(points)
+
+
 def _contains(text: str, label: str) -> bool:
     want = ocr.normalize(label).replace(" ", "")
     return bool(want) and want in ocr.normalize(text).replace(" ", "")
@@ -227,8 +250,9 @@ def _control_score(m: dict) -> int:
 def _rank(m: dict) -> tuple:
     # Word-for-word matches first; among those prefer real controls, enabled, uncovered; then OCR's own ranking.
     info = m.get("info") or {}
+    # A control in a sidebar (<aside>) loses ties to the same control in the main content.
     return (m["tier"] >= 3, _control_score(m), not info.get("disabled"), not m.get("covered"),
-            m["tier"], m["ratio"], m["confidence"], -m["order"], -m["start"])
+            not info.get("side"), m["tier"], m["ratio"], m["confidence"], -m["order"], -m["start"])
 
 
 def _choose(matches: list, near=None, index: int = None) -> Optional[dict]:
@@ -237,8 +261,11 @@ def _choose(matches: list, near=None, index: int = None) -> Optional[dict]:
     same = [m for m in ranked if _rank(m)[:2] == _rank(top)[:2] and m["tier"] == top["tier"]]
     if near is not None:
         nx, ny = near
-        # Same-row neighbours are usually closer in meaning than same-column ones
-        return min(same, key=lambda m: (m["x"] - nx) ** 2 + (2 * (m["y"] - ny)) ** 2)
+        # The one sharing the deepest container with the anchor wins (same form, card or row);
+        # then distance, with same-row neighbours closer in meaning than same-column ones
+        kin = _kin(near, [(m["x"], m["y"]) for m in same]) if len(same) > 1 else [0]
+        return min(zip(kin, same), key=lambda km: (-km[0], (km[1]["x"] - nx) ** 2
+                                                   + (2 * (km[1]["y"] - ny)) ** 2))[1]
     if index is not None:
         ordered = sorted(same, key=lambda m: (m["order"], m["start"]))
         return ordered[index] if -len(ordered) <= index < len(ordered) else None

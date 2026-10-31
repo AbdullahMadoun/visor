@@ -32,10 +32,6 @@ def wizard(live):
     return visor
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "near= ranks by centre-to-centre distance with vertical distance doubled (actions._choose): the "
-    "heading 'Create your account' sits at (454, 48), the sidebar 'Next' at (52, 89) scores 410 and the "
-    "form's own 'Next' at (359, 307) scores 527, so the sidebar link is clicked and the form stays on 1/3"))
 def test_near_the_form_heading_advances_the_form(wizard):
     wizard.click("Next", near="Create your account")
     assert _step() == "Step 2/3"
@@ -66,13 +62,23 @@ def test_expect_is_not_satisfied_by_a_date_that_contains_the_digits(live):
     assert _step() == "Step 2/3", f"click reported success but the page says {_step()!r} (log: {log_text()!r})"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "the original bug: both 'Next' matches tie on tier (5) and control score, so actions._rank falls "
-    "back to reading order and clicks the sidebar link first; click() reports 'changed the page'"))
 def test_plain_next_prefers_the_form_button_over_the_sidebar_link(wizard):
     # No hints at all: what a first-time user writes. The sidebar link comes first in reading order.
     wizard.click("Next")
     assert log_text() == "form:step 2"
+
+
+def test_near_the_sidebar_heading_still_picks_the_sidebar_link(wizard):
+    # The fix must not hard-code "main beats sidebar": an anchor in the sidebar wins it back.
+    wizard.click("Next", near="Help articles")
+    assert log_text() == "sidebar:Next"
+    assert _step() == "Step 1/3"
+
+
+def test_a_sidebar_only_label_is_still_clicked(wizard):
+    # Losing ties is all the sidebar penalty does; a label found only in the sidebar is clicked.
+    wizard.click("Previous")
+    assert log_text() == "sidebar:Previous"
 
 
 # ── 2. A goal that flashes on screen and vanishes ────────────────────────────
