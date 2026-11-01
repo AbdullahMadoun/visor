@@ -468,6 +468,8 @@ def _title(page) -> str:
 
 def new_tab(url: str = None):
     global _page
+    if _browser_context is None:
+        init_browser()  # like get_page(): start the browser if it isn't running (e.g. after close())
     if _alive(_page):
         _tab_stack.append(_page)
     _page = _active_context().new_page()

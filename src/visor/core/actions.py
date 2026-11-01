@@ -296,7 +296,10 @@ def _rank(m: dict) -> tuple:
     info = m.get("info") or {}
     # Ties: the form you are typing in beats the rest of the page, and a sidebar (<aside>) loses.
     return (m["tier"] >= 3, _control_score(m), not info.get("disabled"), not m.get("covered"),
-            bool(info.get("inForm")), not info.get("side"), m["tier"], m["ratio"], m["confidence"], -m["order"], -m["start"])
+            bool(info.get("inForm")), not info.get("side"), m["tier"], m["ratio"],
+            # Confidence only separates a likely misread from a clean read: between two clean reads it
+            # is engine noise (EasyOCR's varies, Apple's barely does), so reading order decides
+            m["confidence"] >= 0.5, -m["order"], -m["start"])
 
 
 def _choose(matches: list, near=None, index: int = None) -> Optional[dict]:

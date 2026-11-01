@@ -100,3 +100,11 @@ def test_attached_scripts_share_one_tab(tmp_path, monkeypatch):
     finally:
         chrome.terminate()
         browser._playwright_context, browser._browser_context, browser._page, browser._owns_browser = saved_state
+
+
+@pytest.mark.browser
+def test_new_tab_after_close_starts_the_browser_again(live):
+    from visor.core import browser
+    browser.close(save=False)
+    page = browser.new_tab()
+    assert page is browser.get_page() and not page.is_closed()

@@ -34,6 +34,18 @@ _APPLE_LANGS = {
 }
 
 
+def _hide_dock_icon():
+    """Apple's OCR loads AppKit, which makes every Python process that reads the screen show up
+    in the Dock. Visor is a background tool: tell macOS so (VISOR_DOCK_ICON=1 keeps the icon)."""
+    if os.environ.get("VISOR_DOCK_ICON") == "1":
+        return
+    try:
+        from AppKit import NSApplication, NSApplicationActivationPolicyProhibited
+        NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyProhibited)
+    except Exception:
+        pass
+
+
 def get_reader():
     global _reader, _use_ocrmac, _engine
     if _reader is None:
@@ -41,6 +53,7 @@ def get_reader():
         try:
             if sys.platform == 'darwin' and wanted != "easyocr":
                 from ocrmac import ocrmac
+                _hide_dock_icon()
                 print("[OCR] Successfully loaded native Apple Vision API (ocrmac). Lightning fast mode enabled.")
                 _reader = ocrmac
                 _use_ocrmac = True
